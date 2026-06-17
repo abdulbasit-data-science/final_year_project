@@ -11,6 +11,8 @@ import type { Exam, ExamAttempt, Violation } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { VIOLATION_TYPES, STATUS_COLORS } from '@/lib/constants'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function AdminDashboard() {
   const router = useRouter()
   const { user, loading: authLoading, logout } = useAuth()
@@ -30,9 +32,9 @@ export default function AdminDashboard() {
       try {
         const apiHeaders = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
         const [examsRes, attemptsRes, violationsRes] = await Promise.all([
-          fetch('http://localhost:8000/api/exams/all', { headers: apiHeaders }).then(r => r.json()),
-          fetch('http://localhost:8000/api/attempts/list', { headers: apiHeaders }).then(r => r.json()),
-          fetch('http://localhost:8000/api/violations/all', { headers: apiHeaders }).then(r => r.json()),
+          fetch(`${API_URL}/api/exams/all`, { headers: apiHeaders }).then(r => r.json()),
+          fetch(`${API_URL}/api/attempts/list`, { headers: apiHeaders }).then(r => r.json()),
+          fetch(`${API_URL}/api/violations/all`, { headers: apiHeaders }).then(r => r.json()),
         ])
         setExams(examsRes.data || [])
         setAttempts(attemptsRes.data || [])
@@ -46,7 +48,7 @@ export default function AdminDashboard() {
   const togglePublish = async (examId: string) => {
     try {
       const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-      const res = await fetch(`http://localhost:8000/api/exams/${examId}/publish`, { method: 'POST', headers })
+      const res = await fetch(`${API_URL}/api/exams/${examId}/publish`, { method: 'POST', headers })
       if (res.ok) {
         const data = await res.json()
         setExams(prev => prev.map(e => e.id === examId ? { ...e, is_published: data.data.is_published } : e))
@@ -56,7 +58,7 @@ export default function AdminDashboard() {
 
   const fetchExams = async () => {
     const apiHeaders = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-    const res = await fetch('http://localhost:8000/api/exams/all', { headers: apiHeaders })
+    const res = await fetch(`${API_URL}/api/exams/all`, { headers: apiHeaders })
     const data = await res.json()
     setExams(data.data || [])
   }
@@ -65,7 +67,7 @@ export default function AdminDashboard() {
     if (!confirm('Are you sure you want to delete this exam?')) return
     try {
       const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-      const res = await fetch(`http://localhost:8000/api/exams/${examId}`, { method: 'DELETE', headers })
+      const res = await fetch(`${API_URL}/api/exams/${examId}`, { method: 'DELETE', headers })
       if (res.ok) await fetchExams()
       else alert('Failed to delete exam')
     } catch (e) { alert('Error deleting exam') }
@@ -74,7 +76,7 @@ export default function AdminDashboard() {
   const reviewAttempt = async (attemptId: string, status: 'reviewed' | 'completed') => {
     try {
       const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}`, 'Content-Type': 'application/json' }
-      const res = await fetch(`http://localhost:8000/api/attempts/${attemptId}`, { method: 'PUT', headers, body: JSON.stringify({ status }) })
+      const res = await fetch(`${API_URL}/api/attempts/${attemptId}`, { method: 'PUT', headers, body: JSON.stringify({ status }) })
       if (res.ok) setAttempts(prev => prev.map(a => a.id === attemptId ? { ...a, status } : a))
     } catch (e) { console.error(e) }
   }
@@ -83,7 +85,7 @@ export default function AdminDashboard() {
     if (!confirm('Are you sure you want to delete this exam report?')) return
     try {
       const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-      const res = await fetch(`http://localhost:8000/api/attempts/${attemptId}`, { method: 'DELETE', headers })
+      const res = await fetch(`${API_URL}/api/attempts/${attemptId}`, { method: 'DELETE', headers })
       if (res.ok) {
         setAttempts(prev => prev.filter(a => a.id !== attemptId))
         setViolations(prev => prev.filter(v => v.attempt_id !== attemptId))
