@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase'
 import type { Exam, ExamAttempt, StudentAnswer, Question } from '@/lib/types'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface UseExamReturn {
   exam: Exam | null
@@ -13,6 +14,7 @@ interface UseExamReturn {
   timeRemaining: number
   loading: boolean
   error: string | null
+  examStartTime: string | null
   startExam: (examId: string) => Promise<void>
   selectAnswer: (questionId: string, option: string) => void
   nextQuestion: () => void
@@ -30,12 +32,12 @@ export function useExam(): UseExamReturn {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const supabase = createClient()
+  const [examStartTime, setExamStartTime] = useState<string | null>(null)
 
   const startExam = useCallback(async (examId: string) => {
     setLoading(true)
     setError(null)
+    setExamStartTime(null)
 
     try {
       const token = localStorage.getItem('access_token')
@@ -45,7 +47,7 @@ export function useExam(): UseExamReturn {
       const user = JSON.parse(userStr)
 
       // Fetch exam & questions from backend
-      const examRes = await fetch(`http://localhost:8000/api/exams/${examId}`, {
+      const examRes = await fetch(`${API_URL}/api/exams/${examId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (!examRes.ok) {
@@ -60,7 +62,7 @@ export function useExam(): UseExamReturn {
       const questionsData = examData.questions || []
 
       // Create or get attempt from backend
-      const attemptRes = await fetch(`http://localhost:8000/api/attempts`, {
+      const attemptRes = await fetch(`${API_URL}/api/attempts`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,8 +72,16 @@ export function useExam(): UseExamReturn {
       })
       
       if (!attemptRes.ok) {
-        const errText = await attemptRes.text()
-        throw new Error(`Failed to start attempt: ${errText}`)
+        const errData = await attemptRes.json()
+        const detail = errData.detail
+        if (typeof detail === 'object' && detail.message === 'This exam has not started yet') {
+          setExam(examData)
+          setQuestions(questionsData)
+          setExamStartTime(detail.start_time)
+          setLoading(false)
+          return
+        }
+        throw new Error(typeof detail === 'string' ? detail : `Failed to start attempt: ${JSON.stringify(detail)}`)
       }
       const attemptDataRes = await attemptRes.json()
       const attemptData = attemptDataRes.data
@@ -114,33 +124,33 @@ export function useExam(): UseExamReturn {
     setLoading(true)
 
     try {
+      const token = localStorage.getItem('access_token')
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      }
+
       const answersList = Array.from(answers.entries()).map(([questionId, option]) => ({
         attempt_id: attempt.id,
         question_id: questionId,
         selected_option: option,
-        answered_at: new Date().toISOString()
       }))
 
-      await supabase.from('student_answers').insert(answersList)
+      const ansRes = await fetch(`${API_URL}/api/attempts/${attempt.id}/answers`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(answersList),
+      })
+      if (!ansRes.ok) throw new Error('Failed to save answers')
 
-      let score = 0
-      for (const question of questions) {
-        const selectedOption = answers.get(question.id)
-        if (selectedOption === question.correct_option) {
-          score += question.marks
-        }
-      }
+      const subRes = await fetch(`${API_URL}/api/attempts/${attempt.id}/submit`, {
+        method: 'POST',
+        headers,
+      })
+      if (!subRes.ok) throw new Error('Failed to submit exam')
 
-      const { error } = await supabase
-        .from('exam_attempts')
-        .update({
-          status: 'completed',
-          submitted_at: new Date().toISOString(),
-          score
-        })
-        .eq('id', attempt.id)
-
-      if (error) throw error
+      const subData = await subRes.json()
+      const score = subData.data?.score ?? 0
 
       setAttempt(prev => prev ? { ...prev, status: 'completed', score, submitted_at: new Date().toISOString() } : null)
     } catch (err: any) {
@@ -148,7 +158,7 @@ export function useExam(): UseExamReturn {
     } finally {
       setLoading(false)
     }
-  }, [attempt, answers, questions, supabase])
+  }, [attempt, answers])
 
   useEffect(() => {
     if (!timeRemaining || timeRemaining <= 0) return
@@ -175,6 +185,7 @@ export function useExam(): UseExamReturn {
     timeRemaining,
     loading,
     error,
+    examStartTime,
     startExam,
     selectAnswer,
     nextQuestion,

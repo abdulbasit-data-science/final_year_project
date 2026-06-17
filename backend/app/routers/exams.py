@@ -198,11 +198,16 @@ async def publish_exam(exam_id: str, authorization: str = Header(None)):
             detail="Not authenticated"
         )
 
-    exam = supabase.table("exams").update({"is_published": True}).eq("id", exam_id).execute()
+    current = supabase.table("exams").select("is_published").eq("id", exam_id).single().execute()
+    if not current.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+
+    new_status = not current.data["is_published"]
+    supabase.table("exams").update({"is_published": new_status}).eq("id", exam_id).execute()
 
     return {
         "success": True,
-        "data": exam.data[0] if exam.data else None
+        "data": { "is_published": new_status }
     }
 
 

@@ -2,22 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import {
-  LayoutDashboard,
-  BookOpen,
-  FileText,
-  Users,
-  LogOut,
-  Plus,
-  Edit,
-  Trash2,
-  Eye,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  Copy
+  LayoutDashboard, BookOpen, FileText, LogOut, Plus, Edit, Trash2,
+  CheckCircle, XCircle, AlertTriangle, Copy, Users, ChevronDown, ChevronRight, Shield, Sparkles
 } from 'lucide-react'
 import type { Exam, ExamAttempt, Violation } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -31,358 +19,282 @@ export default function AdminDashboard() {
   const [attempts, setAttempts] = useState<ExamAttempt[]>([])
   const [violations, setViolations] = useState<Violation[]>([])
   const [loading, setLoading] = useState(true)
-  const [showCreateModal, setShowCreateModal] = useState(false)
-
-  const supabase = createClient()
+  const [expandedViolations, setExpandedViolations] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    if (!authLoading && (!user || user.role !== 'admin')) {
-      router.push('/login')
-    }
+    if (!authLoading && (!user || user.role !== 'admin')) router.push('/login')
   }, [user, authLoading, router])
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch exams via direct supabase (allowed for admin)
-        const examsRes = await supabase.from('exams').select('*').order('created_at', { ascending: false })
-        const apiHeaders = {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-        // Fetch attempts via backend API (requires admin token)
-        const attemptsRes = await fetch('http://localhost:8000/api/attempts/list', { headers: apiHeaders }).then(r => r.json())
-        // Fetch violations via backend API
-        const violationsRes = await fetch('http://localhost:8000/api/violations/all', { headers: apiHeaders }).then(r => r.json())
-
+        const apiHeaders = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+        const [examsRes, attemptsRes, violationsRes] = await Promise.all([
+          fetch('http://localhost:8000/api/exams/all', { headers: apiHeaders }).then(r => r.json()),
+          fetch('http://localhost:8000/api/attempts/list', { headers: apiHeaders }).then(r => r.json()),
+          fetch('http://localhost:8000/api/violations/all', { headers: apiHeaders }).then(r => r.json()),
+        ])
         setExams(examsRes.data || [])
         setAttempts(attemptsRes.data || [])
         setViolations(violationsRes.data || [])
-      } catch (err) {
-        console.error('Failed to fetch dashboard data:', err)
-      } finally {
-        setLoading(false)
-      }
+      } catch (err) { console.error(err) }
+      finally { setLoading(false) }
     }
-
-    if (user?.role === 'admin') {
-      fetchData()
-    }
+    if (user?.role === 'admin') fetchData()
   }, [user])
 
-  const togglePublish = async (examId: string, isPublished: boolean) => {
+  const togglePublish = async (examId: string) => {
     try {
-      const headers = { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
-      const res = await fetch(`http://localhost:8000/api/exams/${examId}/publish`, {
-        method: 'POST',
-        headers
-      })
+      const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+      const res = await fetch(`http://localhost:8000/api/exams/${examId}/publish`, { method: 'POST', headers })
       if (res.ok) {
-        setExams(prev => prev.map(e => e.id === examId ? { ...e, is_published: true } : e)) // Assuming toggle publishes. If unpublish is needed, backend should support it. Since it currently just sets to True, let's keep it optimistic.
+        const data = await res.json()
+        setExams(prev => prev.map(e => e.id === examId ? { ...e, is_published: data.data.is_published } : e))
       }
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
   }
 
   const fetchExams = async () => {
-    const examsRes = await supabase.from('exams').select('*').order('created_at', { ascending: false })
-    setExams(examsRes.data || [])
+    const apiHeaders = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+    const res = await fetch('http://localhost:8000/api/exams/all', { headers: apiHeaders })
+    const data = await res.json()
+    setExams(data.data || [])
   }
 
   const deleteExam = async (examId: string) => {
     if (!confirm('Are you sure you want to delete this exam?')) return
     try {
-      const headers = { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+      const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
       const res = await fetch(`http://localhost:8000/api/exams/${examId}`, { method: 'DELETE', headers })
-      if (res.ok) {
-        // Refresh exams list
-        await fetchExams()
-      } else {
-        const err = await res.json()
-        console.error('Delete failed:', err)
-        alert('Failed to delete exam. Please try again.')
-      }
-    } catch (e) {
-      console.error(e)
-      alert('Error deleting exam')
-    }
+      if (res.ok) await fetchExams()
+      else alert('Failed to delete exam')
+    } catch (e) { alert('Error deleting exam') }
   }
 
   const reviewAttempt = async (attemptId: string, status: 'reviewed' | 'completed') => {
     try {
-      const headers = { 
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        'Content-Type': 'application/json'
-      }
-      const res = await fetch(`http://localhost:8000/api/attempts/${attemptId}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ status })
-      })
-      if (res.ok) {
-        setAttempts(prev => prev.map(a => a.id === attemptId ? { ...a, status } : a))
-      }
-    } catch (e) {
-      console.error(e)
-    }
+      const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}`, 'Content-Type': 'application/json' }
+      const res = await fetch(`http://localhost:8000/api/attempts/${attemptId}`, { method: 'PUT', headers, body: JSON.stringify({ status }) })
+      if (res.ok) setAttempts(prev => prev.map(a => a.id === attemptId ? { ...a, status } : a))
+    } catch (e) { console.error(e) }
   }
 
   const deleteAttempt = async (attemptId: string) => {
     if (!confirm('Are you sure you want to delete this exam report?')) return
     try {
-      const headers = { 
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-      }
-      const res = await fetch(`http://localhost:8000/api/attempts/${attemptId}`, {
-        method: 'DELETE',
-        headers
-      })
+      const headers = { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+      const res = await fetch(`http://localhost:8000/api/attempts/${attemptId}`, { method: 'DELETE', headers })
       if (res.ok) {
         setAttempts(prev => prev.filter(a => a.id !== attemptId))
         setViolations(prev => prev.filter(v => v.attempt_id !== attemptId))
-      } else {
-        alert('Failed to delete exam report')
-      }
-    } catch (e) {
-      console.error(e)
-      alert('Error deleting exam report')
-    }
+      } else alert('Failed to delete exam report')
+    } catch (e) { alert('Error deleting exam report') }
   }
 
   if (authLoading || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-grid">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-primary-700 flex items-center justify-center animate-pulse shadow-glow">
+            <Shield className="w-6 h-6 text-white" />
+          </div>
+          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading dashboard...</div>
+        </div>
       </div>
     )
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r min-h-screen fixed">
-        <div className="p-4 border-b">
-          <div className="flex items-center gap-2">
-            <LayoutDashboard className="w-6 h-6 text-primary" />
-            <span className="font-bold text-gray-900">Admin Panel</span>
+  const Sidebar = () => (
+    <aside className="min-h-screen fixed flex flex-col" style={{ width: 256, backgroundColor: 'var(--bg-card)', borderRight: '1px solid var(--border)' }}>
+      <div className="p-5" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-700 flex items-center justify-center shadow-glow">
+            <LayoutDashboard className="w-4 h-4 text-white" />
+          </div>
+          <span className="font-bold" style={{ color: 'var(--text-primary)' }}>Admin Panel</span>
+        </div>
+      </div>
+      <nav className="p-3 space-y-1 flex-1">
+        <button onClick={() => setActiveTab('exams')}
+          className={cn("w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all",
+            activeTab === 'exams' ? 'bg-primary-50 text-primary-700' : 'hover:bg-surface-50')}
+          style={activeTab === 'exams' ? {} : { color: 'var(--text-secondary)' }}>
+          <BookOpen className="w-4 h-4" /> Manage Exams
+        </button>
+        <button onClick={() => setActiveTab('reports')}
+          className={cn("w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all",
+            activeTab === 'reports' ? 'bg-primary-50 text-primary-700' : 'hover:bg-surface-50')}
+          style={activeTab === 'reports' ? {} : { color: 'var(--text-secondary)' }}>
+          <FileText className="w-4 h-4" /> Exam Reports
+        </button>
+      </nav>
+      <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-100 to-primary-200 flex items-center justify-center" style={{ color: 'var(--accent)' }}>
+            <Users className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user?.full_name}</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Administrator</p>
           </div>
         </div>
-
-        <nav className="p-4 space-y-2">
-          <button
-            onClick={() => setActiveTab('exams')}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
-              activeTab === 'exams' ? "bg-primary text-white" : "text-gray-700 hover:bg-gray-100"
-            )}
-          >
-            <BookOpen className="w-5 h-5" />
-            Exams
-          </button>
-          <button
-            onClick={() => setActiveTab('reports')}
-            className={cn(
-              "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
-              activeTab === 'reports' ? "bg-primary text-white" : "text-gray-700 hover:bg-gray-100"
-            )}
-          >
-            <FileText className="w-5 h-5" />
-            Reports
-          </button>
-        </nav>
-
-        <div className="absolute bottom-4 left-4 right-4">
-          <div className="mb-2 text-sm text-gray-500">{user?.full_name}</div>
-          <button onClick={logout} className="btn btn-secondary w-full flex items-center justify-center gap-2">
-            <LogOut className="w-4 h-4" />
-            Logout
+        <div className="flex items-center gap-3">
+          <button onClick={logout} className="btn btn-ghost w-full text-sm justify-center">
+            <LogOut className="w-4 h-4" /> Sign Out
           </button>
         </div>
-      </aside>
+      </div>
+    </aside>
+  )
 
-      {/* Main Content */}
-      <main className="flex-1 ml-64 p-8">
-        {activeTab === 'exams' ? (
-          <>
-            <div className="flex items-center justify-between mb-8">
-              <h1 className="text-2xl font-bold text-gray-900">Manage Exams</h1>
-              <button
-                onClick={() => router.push('/admin/exams/create')}
-                className="btn btn-primary flex items-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                Create Exam
-              </button>
-            </div>
-
-            <div className="card overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Title</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Duration</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Questions</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Status</th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {exams.map(exam => (
-                    <tr key={exam.id}>
-                      <td className="px-4 py-3 font-medium text-gray-900">{exam.title}</td>
-                      <td className="px-4 py-3 text-gray-500">{exam.duration_minutes} min</td>
-                      <td className="px-4 py-3 text-gray-500">{exam.total_marks} marks</td>
-                      <td className="px-4 py-3">
-                        <span className={cn(
-                          "px-2 py-1 rounded-full text-xs font-medium",
-                          exam.is_published ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
-                        )}>
-                          {exam.is_published ? 'Published' : 'Draft'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(exam.id)
-                              alert('Exam ID copied to clipboard!')
-                            }}
-                            className="p-2 hover:bg-gray-100 rounded-lg"
-                            title="Copy Exam ID"
-                          >
-                            <Copy className="w-4 h-4 text-blue-500" />
-                          </button>
-                          <button
-                            onClick={() => togglePublish(exam.id, exam.is_published)}
-                            className="p-2 hover:bg-gray-100 rounded-lg"
-                            title={exam.is_published ? 'Unpublish' : 'Publish'}
-                          >
-                            {exam.is_published ? <XCircle className="w-4 h-4 text-gray-500" /> : <CheckCircle className="w-4 h-4 text-green-500" />}
-                          </button>
-                          <button className="p-2 hover:bg-gray-100 rounded-lg">
-                            <Edit className="w-4 h-4 text-gray-500" />
-                          </button>
-                          <button
-                            onClick={() => deleteExam(exam.id)}
-                            className="p-2 hover:bg-gray-100 rounded-lg"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-500" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {exams.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                        No exams created yet
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <>
-            <h1 className="text-2xl font-bold text-gray-900 mb-8">Exam Reports</h1>
-
-            <div className="space-y-6">
-              {attempts.map(attempt => {
-                const exam = exams.find(e => e.id === attempt.exam_id)
-                const attemptViolations = violations.filter(v => v.attempt_id === attempt.id)
-
-                return (
-                  <div key={attempt.id} className="card">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-900">{exam?.title || 'Unknown Exam'}</h3>
-                        <p className="text-sm text-gray-500">
-                          Started: {new Date(attempt.started_at).toLocaleString()}
-                          {attempt.submitted_at && (
-                            <> | Submitted: {new Date(attempt.submitted_at).toLocaleString()}</>
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className={cn(
-                          "px-3 py-1 rounded-full text-sm font-medium",
-                          STATUS_COLORS[attempt.status] || STATUS_COLORS.reviewed
-                        )}>
-                          {attempt.status}
-                        </span>
-                        {attempt.status !== 'completed' && attempt.status !== 'reviewed' && (
-                          <>
-                            <button
-                              onClick={() => reviewAttempt(attempt.id, 'completed')}
-                              className="btn btn-secondary text-sm"
-                            >
-                              <CheckCircle className="w-4 h-4 mr-1" />
-                              Accept
-                            </button>
-                            <button
-                              onClick={() => reviewAttempt(attempt.id, 'reviewed')}
-                              className="btn btn-danger text-sm"
-                            >
-                              <XCircle className="w-4 h-4 mr-1" />
-                              Reject
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => deleteAttempt(attempt.id)}
-                          className="p-2 hover:bg-red-100 rounded-lg text-red-500"
-                          title="Delete Report"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="text-sm text-gray-500">Score</div>
-                        <div className="text-xl font-bold text-gray-900">
-                          {attempt.score !== null ? `${attempt.score}/${exam?.total_marks}` : '-'}
-                        </div>
-                      </div>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="text-sm text-gray-500">Violations</div>
-                        <div className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                          <AlertTriangle className="w-5 h-5 text-red-500" />
-                          {attemptViolations.length}
-                        </div>
-                      </div>
-                    </div>
-
-                    {attemptViolations.length > 0 && (
-                      <div className="bg-red-50 p-4 rounded-lg">
-                        <h4 className="font-medium text-red-900 mb-2">Violation Details</h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          {attemptViolations.map((v, i) => (
-                            <div key={i} className="text-sm bg-white p-2 rounded">
-                              <span className="font-medium">{VIOLATION_TYPES[v.violation_type]}</span>
-                              <span className="text-gray-500 ml-2">
-                                {new Date(v.detected_at).toLocaleTimeString()}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+  const ExamsTab = () => (
+    <>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Manage Exams</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Create, publish, and manage your exams</p>
+        </div>
+        <button onClick={() => router.push('/admin/exams/create')} className="btn btn-primary">
+          <Plus className="w-4 h-4" /> Create Exam
+        </button>
+      </div>
+      <div className="card overflow-hidden p-0">
+        <table className="w-full">
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-surface)' }}>
+              <th className="table-header">Title</th>
+              <th className="table-header">Duration</th>
+              <th className="table-header">Marks</th>
+              <th className="table-header">Status</th>
+              <th className="table-header text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
+            {exams.map(exam => (
+              <tr key={exam.id} className="transition-colors hover:bg-surface-50/50">
+                <td className="table-cell font-medium" style={{ color: 'var(--text-primary)' }}>{exam.title}</td>
+                <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>{exam.duration_minutes} min</td>
+                <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>{exam.total_marks}</td>
+                <td className="table-cell">
+                  <span className={cn("badge", exam.is_published ? "badge-success" : "badge-neutral")}>
+                    {exam.is_published ? 'Published' : 'Draft'}
+                  </span>
+                </td>
+                <td className="table-cell text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => { navigator.clipboard.writeText(exam.id); alert('Exam ID copied!') }} className="btn-ghost p-2 rounded-lg"><Copy className="w-4 h-4" /></button>
+                    <button onClick={() => togglePublish(exam.id)} className="btn-ghost p-2 rounded-lg">
+                      {exam.is_published ? <XCircle className="w-4 h-4 text-amber-500" /> : <CheckCircle className="w-4 h-4 text-emerald-500" />}
+                    </button>
+                    <button className="btn-ghost p-2 rounded-lg"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => deleteExam(exam.id)} className="btn-ghost p-2 rounded-lg hover:bg-red-50"><Trash2 className="w-4 h-4 text-red-400" /></button>
                   </div>
-                )
-              })}
+                </td>
+              </tr>
+            ))}
+            {exams.length === 0 && (
+              <tr><td colSpan={5} className="px-4 py-12 text-center">
+                <BookOpen className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
+                <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>No exams created yet</p>
+                <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Click "Create Exam" to get started</p>
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
 
-              {attempts.length === 0 && (
-                <div className="card text-center py-12">
-                  <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500">No exam attempts yet</p>
+  const ReportsTab = () => (
+    <>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Exam Reports</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Review student attempts and violations</p>
+      </div>
+      <div className="space-y-4">
+        {attempts.map(attempt => {
+          const exam = exams.find(e => e.id === attempt.exam_id)
+          const attemptViolations = violations.filter(v => v.attempt_id === attempt.id)
+          const isExpanded = expandedViolations[attempt.id] || false
+          return (
+            <div key={attempt.id} className="card animate-fade-in">
+              <div className="flex items-start justify-between mb-5">
+                <div>
+                  <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{exam?.title || 'Unknown Exam'}</h3>
+                  <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{(attempt as any).student_name || attempt.student_id}</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    {new Date(attempt.started_at).toLocaleString()}
+                    {attempt.submitted_at && <> &middot; {new Date(attempt.submitted_at).toLocaleString()}</>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={cn("badge", attempt.status === 'completed' ? "badge-success" : attempt.status === 'flagged' ? "badge-danger" : attempt.status === 'in_progress' ? "badge-info" : "badge-neutral")}>{attempt.status}</span>
+                  {attempt.status !== 'completed' && attempt.status !== 'reviewed' && <>
+                    <button onClick={() => reviewAttempt(attempt.id, 'completed')} className="btn-ghost p-2 rounded-lg text-emerald-600"><CheckCircle className="w-4 h-4" /></button>
+                    <button onClick={() => reviewAttempt(attempt.id, 'reviewed')} className="btn-ghost p-2 rounded-lg text-red-500"><XCircle className="w-4 h-4" /></button>
+                  </>}
+                  <button onClick={() => deleteAttempt(attempt.id)} className="btn-ghost p-2 rounded-lg hover:bg-red-50 text-red-400"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--bg-surface)' }}>
+                  <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Score</p>
+                  <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{attempt.score !== null ? `${attempt.score}/${exam?.total_marks}` : '-'}</p>
+                </div>
+                <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--bg-surface)' }}>
+                  <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Violations</p>
+                  <p className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                    <AlertTriangle className="w-5 h-5 text-red-400" /> {attemptViolations.length}
+                  </p>
+                </div>
+                <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--bg-surface)' }}>
+                  <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Duration</p>
+                  <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                    {attempt.submitted_at ? Math.round((new Date(attempt.submitted_at).getTime() - new Date(attempt.started_at).getTime()) / 60000) + ' min' : 'In progress'}
+                  </p>
+                </div>
+              </div>
+              {attemptViolations.length > 0 && (
+                <div>
+                  <button onClick={() => setExpandedViolations(prev => ({ ...prev, [attempt.id]: !isExpanded }))}
+                    className="flex items-center gap-2 w-full p-3 rounded-xl hover:bg-red-50 transition-colors text-sm"
+                    style={{ color: 'var(--text-primary)' }}>
+                    {isExpanded ? <ChevronDown className="w-4 h-4 text-red-400" /> : <ChevronRight className="w-4 h-4 text-red-400" />}
+                    <AlertTriangle className="w-4 h-4 text-red-400" />
+                    <span className="font-medium text-red-700">{attemptViolations.length} Violation{attemptViolations.length > 1 ? 's' : ''}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="rounded-xl p-4 mt-1 grid grid-cols-2 gap-2 animate-fade-in" style={{ backgroundColor: 'rgba(239,68,68,0.05)' }}>
+                      {attemptViolations.map((v, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm rounded-lg p-3" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{VIOLATION_TYPES[v.violation_type]}</span>
+                          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>{new Date(v.detected_at).toLocaleTimeString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          </>
+          )
+        })}
+        {attempts.length === 0 && (
+          <div className="card text-center py-16" style={{ borderStyle: 'dashed', borderWidth: 2, borderColor: 'var(--border)' }}>
+            <FileText className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
+            <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>No exam attempts yet</p>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Reports appear here once students take exams</p>
+          </div>
         )}
+      </div>
+    </>
+  )
+
+  return (
+    <div className="min-h-screen bg-grid relative" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="fixed top-[-15%] left-[-5%] w-[30%] h-[30%] rounded-full bg-gradient-to-br from-primary-400/10 to-primary-600/5 blur-3xl animate-float pointer-events-none" />
+      <Sidebar />
+      <main className="ml-64 p-8" style={{ minHeight: '100vh' }}>
+        {activeTab === 'exams' ? <ExamsTab /> : <ReportsTab />}
       </main>
     </div>
   )

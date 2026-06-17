@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Header
 from uuid import UUID
 from typing import List, Optional
+from datetime import datetime, timezone
 from supabase import create_client, Client
 from app.config import settings
 from app.schemas.attempt import (
@@ -59,13 +60,19 @@ async def start_attempt(attempt_data: ExamAttemptCreate, authorization: str = He
 
     existing = supabase.table("exam_attempts").select("*").eq(
         "exam_id", str(attempt_data.exam_id)
-    ).eq("student_id", user.user.id).eq("status", "in_progress").execute()
+    ).eq("student_id", user.user.id).execute()
 
     if existing.data:
-        return {
-            "success": True,
-            "data": existing.data[0]
-        }
+        existing_attempt = existing.data[0]
+        if existing_attempt.get("status") == "in_progress":
+            return {
+                "success": True,
+                "data": existing_attempt
+            }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You have already attempted this exam. Multiple attempts are not allowed."
+        )
 
     # Fetch exam to check time window
     exam = supabase.table("exams").select("*").eq("id", str(attempt_data.exam_id)).single().execute()
@@ -73,13 +80,18 @@ async def start_attempt(attempt_data: ExamAttemptCreate, authorization: str = He
         raise HTTPException(status_code=404, detail="Exam not found")
         
     exam_data = exam.data
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     
     if exam_data.get("start_time"):
         start_time = datetime.fromisoformat(exam_data["start_time"])
         if now < start_time:
-            raise HTTPException(status_code=400, detail="This exam has not started yet")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "This exam has not started yet",
+                    "start_time": exam_data["start_time"]
+                }
+            )
             
     if exam_data.get("end_time"):
         end_time = datetime.fromisoformat(exam_data["end_time"])
@@ -106,7 +118,22 @@ async def list_attempts(authorization: Optional[str] = Header(None)):
         if not user or not user.user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
         attempts = supabase.table("exam_attempts").select("*").order("started_at", desc=True).execute()
-        return {"success": True, "data": attempts.data}
+
+        student_ids = list(set(a.get("student_id") for a in attempts.data if a.get("student_id")))
+        profiles_map = {}
+        if student_ids:
+            profiles = supabase.table("profiles").select("id, full_name, email").in_("id", student_ids).execute()
+            for p in profiles.data or []:
+                profiles_map[p["id"]] = p
+
+        result_data = []
+        for a in attempts.data:
+            student_info = profiles_map.get(a.get("student_id"), {})
+            a["student_name"] = student_info.get("full_name") or a.get("student_id")
+            a["student_email"] = student_info.get("email") or ""
+            result_data.append(a)
+
+        return {"success": True, "data": result_data}
     except HTTPException:
         raise
     except Exception as e:

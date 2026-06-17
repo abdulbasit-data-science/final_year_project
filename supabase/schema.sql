@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS exams (
     description TEXT,
     duration_minutes INTEGER NOT NULL,
     total_marks INTEGER NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
     is_published BOOLEAN DEFAULT FALSE,
     created_by UUID REFERENCES profiles(id),
     created_at TIMESTAMP DEFAULT NOW(),

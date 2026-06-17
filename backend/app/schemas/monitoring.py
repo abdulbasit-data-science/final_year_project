@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from enum import Enum
 
 
@@ -26,7 +26,7 @@ class DetectionResult(BaseModel):
 
 
 class FrameAnalysisRequest(BaseModel):
-    frame_data: str  # Base64 encoded frame
+    frame_data: str
     attempt_id: str
     timestamp: Optional[float] = None
 
@@ -35,3 +35,4 @@ class FrameAnalysisResponse(BaseModel):
     success: bool
     violations: List[dict]
     processed: bool
+    stats: Optional[dict] = None

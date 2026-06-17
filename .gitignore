@@ -44,10 +44,11 @@ node_modules/
 .next/
 out/
 
-# Models (YOLO, etc.)
+# Models (YOLO, MobileNet-SSD, etc.)
 models/
 config/*.cfg
 config/*.weights
+config/*.pbtxt
 
 # OS
 .DS_Store

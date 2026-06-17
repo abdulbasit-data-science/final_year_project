@@ -1,16 +1,16 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { createClient } from '@/lib/supabase'
 import type { ViolationType } from '@/lib/types'
 import { MONITORING_INTERVAL, FRAME_SEND_INTERVAL, MAX_LOOKING_AWAY_SECONDS } from '@/lib/constants'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface MonitoringState {
   isMonitoring: boolean
   isWebcamActive: boolean
   violations: ViolationType[]
   lastViolation: ViolationType | null
-  lookingAwayTime: number
   tabSwitchCount: number
 }
 
@@ -18,6 +18,9 @@ interface UseMonitoringReturn extends MonitoringState {
   startMonitoring: () => Promise<void>
   stopMonitoring: () => void
   sendViolation: (type: ViolationType, attemptId: string) => Promise<void>
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  canvasRef: React.RefObject<HTMLCanvasElement | null>
+  streamRef: React.RefObject<MediaStream | null>
 }
 
 export function useMonitoring(attemptId: string): UseMonitoringReturn {
@@ -26,8 +29,7 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
     isWebcamActive: false,
     violations: [],
     lastViolation: null,
-    lookingAwayTime: 0,
-    tabSwitchCount: 0
+    tabSwitchCount: 0,
   })
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -35,13 +37,22 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
   const streamRef = useRef<MediaStream | null>(null)
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const frameIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const lookingAwayIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastFrameTimeRef = useRef<number>(0)
+  const lastViolationTimeRef = useRef<Record<string, number>>({})
+  const violationCooldownRef = useRef(5000)
+
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem('access_token')
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }
+  }, [])
 
   const startWebcam = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' }
+        video: { width: 640, height: 480, facingMode: 'user' },
       })
       streamRef.current = stream
 
@@ -59,49 +70,53 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
   }, [])
 
   const sendViolation = useCallback(async (type: ViolationType, attemptId: string) => {
-    const severity = type === 'multiple_faces' || type === 'phone_detected' || type === 'no_face_detected'
-      ? 'high'
-      : type === 'window_blur'
-      ? 'medium'
-      : 'low'
+    const severity =
+      type === 'multiple_faces' || type === 'phone_detected' || type === 'no_face_detected'
+        ? 'high'
+        : type === 'window_blur'
+        ? 'medium'
+        : 'low'
+
+    const now = Date.now()
+    const lastTime = lastViolationTimeRef.current[type] || 0
+    if (now - lastTime < violationCooldownRef.current) return
+    lastViolationTimeRef.current[type] = now
 
     try {
-      const response = await fetch('http://localhost:8000/api/violations', {
+      const response = await fetch(`${API_URL}/api/violations`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           attempt_id: attemptId,
           violation_type: type,
           severity,
           description: `Detected ${type} violation`,
-          frame_snapshot_url: null
-        })
+          frame_snapshot_url: null,
+        }),
       })
 
       if (response.ok) {
         setState(prev => ({
           ...prev,
           violations: [...prev.violations, type],
-          lastViolation: type
+          lastViolation: type,
         }))
       }
     } catch (err) {
-      console.error('Failed to log violation to backend:', err)
+      console.error('Failed to log violation:', err)
     }
-  }, [])
+  }, [getAuthHeaders])
 
   const heartbeat = useCallback(async () => {
-    const supabase = createClient()
-    await supabase.from('exam_sessions').upsert({
-      attempt_id: attemptId,
-      is_active: true,
-      session_start: new Date().toISOString()
-    }, {
-      onConflict: 'attempt_id'
-    })
-  }, [attemptId])
+    try {
+      await fetch(
+        `${API_URL}/api/monitoring/heartbeat?attempt_id=${attemptId}`,
+        { headers: getAuthHeaders() }
+      )
+    } catch (err) {
+      console.error('Heartbeat failed:', err)
+    }
+  }, [attemptId, getAuthHeaders])
 
   const captureFrame = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return null
@@ -134,17 +149,15 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
         if (frame) {
           lastFrameTimeRef.current = now
           try {
-            const response = await fetch('http://localhost:8000/api/monitoring/analyze', {
+            const response = await fetch(`${API_URL}/api/monitoring/analyze`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: getAuthHeaders(),
               body: JSON.stringify({
                 frame_data: frame,
-                attempt_id: attemptId
+                attempt_id: attemptId,
               }),
             })
-            
+
             if (response.ok) {
               const data = await response.json()
               if (data.success && data.violations && data.violations.length > 0) {
@@ -159,18 +172,7 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
         }
       }
     }, 500)
-
-    lookingAwayIntervalRef.current = setInterval(() => {
-      setState(prev => {
-        const newLookingAwayTime = prev.lookingAwayTime + 1
-        if (newLookingAwayTime >= MAX_LOOKING_AWAY_SECONDS) {
-          sendViolation('looking_away_excessive', attemptId)
-          return { ...prev, lookingAwayTime: 0 }
-        }
-        return { ...prev, lookingAwayTime: newLookingAwayTime }
-      })
-    }, 1000)
-  }, [startWebcam, heartbeat, captureFrame, sendViolation, attemptId])
+  }, [startWebcam, heartbeat, captureFrame, sendViolation, attemptId, getAuthHeaders])
 
   const stopMonitoring = useCallback(() => {
     if (streamRef.current) {
@@ -188,24 +190,12 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
       frameIntervalRef.current = null
     }
 
-    if (lookingAwayIntervalRef.current) {
-      clearInterval(lookingAwayIntervalRef.current)
-      lookingAwayIntervalRef.current = null
-    }
-
     setState(prev => ({
       ...prev,
       isMonitoring: false,
       isWebcamActive: false,
-      lookingAwayTime: 0
     }))
   }, [])
-
-  useEffect(() => {
-    return () => {
-      stopMonitoring()
-    }
-  }, [stopMonitoring])
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -230,10 +220,19 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
     }
   }, [state.isMonitoring, sendViolation, attemptId])
 
+  useEffect(() => {
+    return () => {
+      stopMonitoring()
+    }
+  }, [stopMonitoring])
+
   return {
     ...state,
     startMonitoring,
     stopMonitoring,
-    sendViolation
+    sendViolation,
+    videoRef,
+    canvasRef,
+    streamRef,
   }
 }

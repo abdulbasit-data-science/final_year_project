@@ -6,14 +6,8 @@ import { useExam } from '@/hooks/useExam'
 import { useMonitoring } from '@/hooks/useMonitoring'
 import { useViolations } from '@/hooks/useViolations'
 import {
-  Clock,
-  Camera,
-  AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
-  Flag,
-  X,
-  Send
+  Clock, Camera, AlertTriangle, ChevronLeft, ChevronRight,
+  Flag, X, Send, CameraOff, Timer, CheckCircle2, Shield, Sparkles
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { VIOLATION_TYPES } from '@/lib/constants'
@@ -21,52 +15,29 @@ import { VIOLATION_TYPES } from '@/lib/constants'
 function ExamContent({ examId }: { examId: string }) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const attemptId = searchParams.get('attemptId')
-
-  const {
-    exam,
-    attempt,
-    questions,
-    answers,
-    currentQuestion,
-    timeRemaining,
-    loading: examLoading,
-    error,
-    startExam,
-    selectAnswer,
-    nextQuestion,
-    prevQuestion,
-    goToQuestion,
-    submitExam
-  } = useExam()
-
-  const {
-    isMonitoring,
-    isWebcamActive,
-    lastViolation,
-    tabSwitchCount,
-    startMonitoring,
-    stopMonitoring,
-    sendViolation
-  } = useMonitoring(attempt?.id || '')
-
+  const { exam, attempt, questions, answers, currentQuestion, timeRemaining, loading: examLoading, error, examStartTime, startExam, selectAnswer, nextQuestion, prevQuestion, goToQuestion, submitExam } = useExam()
+  const { isMonitoring, isWebcamActive, lastViolation, tabSwitchCount, startMonitoring, stopMonitoring, videoRef, canvasRef } = useMonitoring(attempt?.id || '')
   const { violations } = useViolations()
 
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [showViolationAlert, setShowViolationAlert] = useState(false)
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   useEffect(() => {
-    if (examId) {
-      startExam(examId)
+    if (!examStartTime) { setCountdown(null); return }
+    const updateCountdown = () => {
+      const now = Date.now()
+      const diff = Math.max(0, Math.floor((new Date(examStartTime).getTime() - now) / 1000))
+      setCountdown(diff)
+      if (diff <= 0) startExam(examId)
     }
-  }, [examId, startExam])
+    updateCountdown()
+    const interval = setInterval(updateCountdown, 1000)
+    return () => clearInterval(interval)
+  }, [examStartTime, examId, startExam])
 
-  useEffect(() => {
-    if (attempt?.id && !isMonitoring) {
-      startMonitoring()
-    }
-  }, [attempt?.id, isMonitoring, startMonitoring])
-
+  useEffect(() => { if (examId) startExam(examId) }, [examId, startExam])
+  useEffect(() => { if (attempt?.id && !isMonitoring) startMonitoring() }, [attempt?.id, isMonitoring, startMonitoring])
   useEffect(() => {
     if (lastViolation) {
       setShowViolationAlert(true)
@@ -75,31 +46,32 @@ function ExamContent({ examId }: { examId: string }) {
     }
   }, [lastViolation])
 
-  const handleSubmit = async () => {
-    stopMonitoring()
-    await submitExam()
-    router.push('/student/dashboard')
-  }
+  const handleSubmit = async () => { stopMonitoring(); await submitExam(); router.push('/student/dashboard') }
+  const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
+  if (examStartTime && countdown !== null && countdown > 0) {
+    return (
+      <div className="min-h-screen bg-grid relative flex items-center justify-center overflow-hidden">
+        <div className="fixed top-[-15%] left-[-5%] w-[35%] h-[35%] rounded-full bg-gradient-to-br from-primary-400/20 to-primary-600/10 blur-3xl animate-float" />
+        <div className="card-glass max-w-md w-full text-center p-10 animate-scale-in">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-50 to-primary-100 flex items-center justify-center mx-auto mb-6" style={{ color: 'var(--accent)' }}><Timer className="w-8 h-8" /></div>
+          <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>{exam?.title || 'Exam'}</h1>
+          <p className="mb-8" style={{ color: 'var(--text-secondary)' }}>Starts in</p>
+          <div className="text-6xl font-bold font-mono mb-8 tracking-tight" style={{ color: 'var(--accent)' }}>{formatTime(countdown)}</div>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>The exam will begin automatically when the timer reaches zero.</p>
+        </div>
+      </div>
+    )
   }
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-red-600 bg-red-50 p-6 rounded-lg text-center max-w-md">
-          <AlertTriangle className="w-12 h-12 mx-auto mb-4" />
-          <h2 className="text-xl font-bold mb-2">Failed to start exam</h2>
-          <p>{error}</p>
-          <button 
-            onClick={() => router.push('/student/dashboard')}
-            className="mt-6 btn btn-primary"
-          >
-            Return to Dashboard
-          </button>
+      <div className="min-h-screen bg-grid relative flex items-center justify-center">
+        <div className="card max-w-md w-full text-center p-8 animate-scale-in">
+          <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-5"><AlertTriangle className="w-7 h-7 text-red-500" /></div>
+          <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Failed to start exam</h2>
+          <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>{error}</p>
+          <button onClick={() => router.push('/student/dashboard')} className="btn btn-primary">Return to Dashboard</button>
         </div>
       </div>
     )
@@ -107,8 +79,11 @@ function ExamContent({ examId }: { examId: string }) {
 
   if (examLoading || !exam || !attempt) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading exam...</div>
+      <div className="min-h-screen flex items-center justify-center bg-grid">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-primary-700 flex items-center justify-center animate-pulse shadow-glow"><Shield className="w-6 h-6 text-white" /></div>
+          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading exam...</div>
+        </div>
       </div>
     )
   }
@@ -117,164 +92,95 @@ function ExamContent({ examId }: { examId: string }) {
   const answeredCount = answers.size
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm fixed top-0 left-0 right-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-gray-900">{exam.title}</h1>
+    <div className="min-h-screen bg-grid relative" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <canvas ref={canvasRef as React.RefObject<HTMLCanvasElement>} className="hidden" />
+      <div className="fixed top-[-15%] left-[-5%] w-[30%] h-[30%] rounded-full bg-gradient-to-br from-primary-400/10 to-primary-600/5 blur-3xl animate-float pointer-events-none" />
 
-          <div className="flex items-center gap-6">
-            <div className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg font-mono",
-              timeRemaining < 300 ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-700"
-            )}>
-              <Clock className="w-5 h-5" />
-              {formatTime(timeRemaining)}
+      <header className="glass sticky top-0 z-50" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="page-container flex items-center justify-between h-16">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-700 flex items-center justify-center shadow-glow"><Shield className="w-4 h-4 text-white" /></div>
+            <h1 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{exam.title}</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className={cn("flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-mono text-sm font-medium", timeRemaining < 300 ? 'bg-red-50 text-red-700' : 'glass')}>
+              <Clock className="w-4 h-4" /> {formatTime(timeRemaining)}
             </div>
-
-            <div className={cn(
-              "flex items-center gap-2 px-3 py-2 rounded-lg",
-              isWebcamActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-            )}>
-              <Camera className="w-5 h-5" />
-              {isWebcamActive ? 'Recording' : 'No Camera'}
+            <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium", isWebcamActive ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
+              {isWebcamActive ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
+              {isWebcamActive ? 'Camera Active' : 'No Camera'}
             </div>
-
             {tabSwitchCount > 0 && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning text-white">
-                <AlertTriangle className="w-5 h-5" />
-                {tabSwitchCount} violations
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-medium">
+                <AlertTriangle className="w-3.5 h-3.5" /> {tabSwitchCount}
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 pt-20 pb-8 flex gap-6">
-        {/* Question Area */}
-        <div className="flex-1">
+      <main className="page-container pt-20 pb-8 flex gap-6">
+        <div className="flex-1 min-w-0">
           <div className="card">
             <div className="flex items-center justify-between mb-6">
-              <span className="text-sm text-gray-500">
-                Question {currentQuestion + 1} of {questions.length}
-              </span>
-              <span className="text-sm text-gray-500">
-                {answeredCount} answered
-              </span>
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Question <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{currentQuestion + 1}</span> of {questions.length}</span>
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}><span className="font-medium text-emerald-600">{answeredCount}</span> answered</span>
             </div>
-
-            <p className="text-lg text-gray-900 mb-8">{currentQ.question_text}</p>
-
-            <div className="space-y-4">
-              {['A', 'B', 'C', 'D'].map(option => (
-                <button
-                  key={option}
-                  onClick={() => selectAnswer(currentQ.id, option)}
-                  className={cn(
-                    "w-full p-4 rounded-lg border-2 text-left transition-colors",
-                    answers.get(currentQ.id) === option
-                      ? "border-primary bg-blue-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  )}
-                >
-                  <span className={cn(
-                    "inline-flex items-center justify-center w-8 h-8 rounded-full mr-3 font-medium",
-                    answers.get(currentQ.id) === option
-                      ? "bg-primary text-white"
-                      : "bg-gray-100 text-gray-700"
-                  )}>
-                    {option}
-                  </span>
-                  {currentQ[`option_${option.toLowerCase()}` as keyof typeof currentQ]}
-                </button>
-              ))}
+            <p className="text-lg mb-8 leading-relaxed" style={{ color: 'var(--text-primary)' }}>{currentQ.question_text}</p>
+            <div className="space-y-3">
+              {['A', 'B', 'C', 'D'].map(option => {
+                const isSelected = answers.get(currentQ.id) === option
+                return (
+                  <button key={option} onClick={() => selectAnswer(currentQ.id, option)}
+                    className={cn("w-full p-4 rounded-xl border-2 text-left transition-all duration-150", isSelected ? 'border-primary shadow-sm' : 'hover:border-primary/30')}
+                    style={{ backgroundColor: isSelected ? 'var(--accent-glow)' : 'var(--bg-card)', borderColor: isSelected ? 'var(--accent)' : 'var(--border) ' }}>
+                    <div className="flex items-center gap-3">
+                      <span className={cn("inline-flex items-center justify-center w-8 h-8 rounded-lg text-sm font-semibold transition-all", isSelected ? 'bg-primary text-white shadow-sm' : 'bg-surface-100')}
+                        style={isSelected ? {} : { backgroundColor: 'var(--bg-surface)', color: 'var(--text-secondary)' }}>
+                        {option}
+                      </span>
+                      <span className={cn("text-sm", isSelected ? 'font-medium' : '')} style={{ color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                        {currentQ[`option_${option.toLowerCase()}` as keyof typeof currentQ]}
+                      </span>
+                      {isSelected && <CheckCircle2 className="w-4 h-4 ml-auto" style={{ color: 'var(--accent)' }} />}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
-
-            <div className="flex items-center justify-between mt-8 pt-6 border-t">
-              <button
-                onClick={prevQuestion}
-                disabled={currentQuestion === 0}
-                className="btn btn-secondary flex items-center gap-2 disabled:opacity-50"
-              >
-                <ChevronLeft className="w-5 h-5" />
-                Previous
-              </button>
-
+            <div className="flex items-center justify-between mt-8 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
+              <button onClick={prevQuestion} disabled={currentQuestion === 0} className="btn btn-secondary disabled:opacity-50"><ChevronLeft className="w-4 h-4" /> Previous</button>
               {currentQuestion === questions.length - 1 ? (
-                <button
-                  onClick={() => setShowSubmitModal(true)}
-                  className="btn btn-primary flex items-center gap-2"
-                >
-                  <Send className="w-5 h-5" />
-                  Submit Exam
-                </button>
+                <button onClick={() => setShowSubmitModal(true)} className="btn btn-primary"><Send className="w-4 h-4" /> Submit Exam</button>
               ) : (
-                <button
-                  onClick={nextQuestion}
-                  className="btn btn-primary flex items-center gap-2"
-                >
-                  Next
-                  <ChevronRight className="w-5 h-5" />
-                </button>
+                <button onClick={nextQuestion} className="btn btn-primary">Next <ChevronRight className="w-4 h-4" /></button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="w-80 space-y-6">
-          {/* Webcam Preview */}
+        <div className="w-80 flex-shrink-0 space-y-6">
           <div className="card">
-            <h3 className="font-semibold text-gray-900 mb-4">Camera Preview</h3>
-            <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden">
-              <video
-                ref={videoRef => {
-                  if (videoRef && isWebcamActive) {
-                    videoRef.srcObject = (window as any).stream
-                  }
-                }}
-                autoPlay
-                muted
-                playsInline
-                className="w-full h-full object-cover"
-              />
-            </div>
-          </div>
-
-          {/* Question Navigator */}
-          <div className="card">
-            <h3 className="font-semibold text-gray-900 mb-4">Questions</h3>
+            <h3 className="font-semibold mb-4 text-sm" style={{ color: 'var(--text-primary)' }}>Questions</h3>
             <div className="grid grid-cols-5 gap-2">
               {questions.map((q, i) => (
-                <button
-                  key={q.id}
-                  onClick={() => goToQuestion(i)}
-                  className={cn(
-                    "aspect-square rounded-lg font-medium text-sm",
-                    i === currentQuestion
-                      ? "bg-primary text-white"
-                      : answers.has(q.id)
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  )}
-                >
+                <button key={q.id} onClick={() => goToQuestion(i)}
+                  className={cn("aspect-square rounded-lg text-sm font-medium transition-all", i === currentQuestion ? 'bg-primary text-white shadow-sm' : answers.has(q.id) ? 'border' : '')}
+                  style={i === currentQuestion ? {} : answers.has(q.id) ? { backgroundColor: 'rgba(16,185,129,0.1)', color: 'var(--success)', borderColor: 'rgba(16,185,129,0.2)' } : { backgroundColor: 'var(--bg-surface)', color: 'var(--text-secondary)' }}>
                   {i + 1}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Violations */}
           {violations.length > 0 && (
             <div className="card">
-              <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <Flag className="w-4 h-4" />
-                Violations
+              <h3 className="font-semibold mb-4 flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+                <Flag className="w-4 h-4 text-red-500" /> Violations
               </h3>
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-48 overflow-y-auto">
                 {violations.map((v, i) => (
-                  <div key={i} className="text-sm p-2 bg-red-50 rounded-lg">
+                  <div key={i} className="text-xs p-2.5 rounded-lg" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.15)' }}>
                     {VIOLATION_TYPES[v.violation_type]}
                   </div>
                 ))}
@@ -284,42 +190,30 @@ function ExamContent({ examId }: { examId: string }) {
         </div>
       </main>
 
-      {/* Violation Alert */}
       {showViolationAlert && lastViolation && (
-        <div className="fixed bottom-4 right-4 bg-red-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 animate-pulse">
-          <AlertTriangle className="w-6 h-6" />
+        <div className="fixed bottom-4 right-4 px-5 py-3.5 rounded-xl shadow-elevated flex items-center gap-3 animate-slide-up"
+          style={{ backgroundColor: 'var(--danger)', color: 'white' }}>
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
           <div>
-            <div className="font-semibold">Violation Detected</div>
-            <div className="text-sm opacity-90">{VIOLATION_TYPES[lastViolation]}</div>
+            <div className="font-semibold text-sm">Violation Detected</div>
+            <div className="text-xs opacity-80">{VIOLATION_TYPES[lastViolation]}</div>
           </div>
-          <button onClick={() => setShowViolationAlert(false)} className="ml-4">
-            <X className="w-5 h-5" />
-          </button>
+          <button onClick={() => setShowViolationAlert(false)} className="ml-2 p-1 rounded-lg hover:bg-white/20"><X className="w-4 h-4" /></button>
         </div>
       )}
 
-      {/* Submit Modal */}
       {showSubmitModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Submit Exam</h2>
-            <p className="text-gray-600 mb-6">
-              You have answered {answeredCount} out of {questions.length} questions.
-              Are you sure you want to submit?
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="rounded-2xl p-6 max-w-md w-full mx-4 animate-scale-in shadow-modal"
+            style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Submit Exam</h2>
+            <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
+              You have answered <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{answeredCount}</span> of{' '}
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{questions.length}</span> questions. Are you sure?
             </p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => setShowSubmitModal(false)}
-                className="btn btn-secondary flex-1"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                className="btn btn-primary flex-1"
-              >
-                Submit
-              </button>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSubmitModal(false)} className="btn btn-secondary flex-1">Cancel</button>
+              <button onClick={handleSubmit} className="btn btn-primary flex-1"><Send className="w-4 h-4" /> Submit</button>
             </div>
           </div>
         </div>
@@ -330,7 +224,14 @@ function ExamContent({ examId }: { examId: string }) {
 
 export default function ExamPage({ params }: { params: { id: string } }) {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-grid">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-700 flex items-center justify-center animate-pulse shadow-glow"><Shield className="w-4 h-4 text-white" /></div>
+          <span style={{ color: 'var(--text-muted)' }}>Loading...</span>
+        </div>
+      </div>
+    }>
       <ExamContent examId={params.id} />
     </Suspense>
   )

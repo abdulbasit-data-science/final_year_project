@@ -20,8 +20,8 @@ def get_supabase() -> Client:
             settings.SUPABASE_SERVICE_KEY,
             options=ClientOptions(
                 auto_refresh_token=False,
-                persist_session=False
-            )
+                persist_session=False,
+            ),
         )
     return supabase
 
@@ -38,13 +38,20 @@ def get_user_from_token(authorization: Optional[str]) -> Optional[dict]:
 
 
 @router.post("/analyze", response_model=FrameAnalysisResponse)
-async def analyze_frame(request: FrameAnalysisRequest):
+async def analyze_frame(request: FrameAnalysisRequest, authorization: Optional[str] = Header(None)):
+    user = get_user_from_token(authorization)
+    if not user or not user.user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
     try:
         result = processor.process_frame(request.frame_data, request.attempt_id)
         return FrameAnalysisResponse(
-            success=result['success'],
-            violations=result['violations'],
-            processed=result['processed']
+            success=result["success"],
+            violations=result["violations"],
+            processed=result["processed"],
+            stats=result.get("stats"),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -64,7 +71,7 @@ async def heartbeat(attempt_id: str, event_type: Optional[str] = None, authoriza
     if not user or not user.user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+            detail="Not authenticated",
         )
 
     existing = supabase.table("exam_sessions").select("*").eq(
@@ -73,23 +80,18 @@ async def heartbeat(attempt_id: str, event_type: Optional[str] = None, authoriza
 
     if existing.data:
         supabase.table("exam_sessions").update({
-            "session_end": "now()"
+            "session_end": "now()",
         }).eq("id", existing.data[0]["id"]).execute()
 
     session = supabase.table("exam_sessions").insert({
         "attempt_id": attempt_id,
         "is_active": True,
-        "session_start": "now()"
+        "session_start": "now()",
     }).execute()
-
-    if event_type in ["tab_switch", "window_blur", "visibility_change"]:
-        supabase.table("exam_attempts").update({
-            "status": "in_progress"
-        }).eq("id", attempt_id).execute()
 
     return {
         "success": True,
-        "data": session.data[0] if session.data else None
+        "data": session.data[0] if session.data else None,
     }
 
 
@@ -101,7 +103,7 @@ async def get_session(attempt_id: str, authorization: Optional[str] = Header(Non
     if not user or not user.user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+            detail="Not authenticated",
         )
 
     session = supabase.table("exam_sessions").select("*").eq(
@@ -110,7 +112,7 @@ async def get_session(attempt_id: str, authorization: Optional[str] = Header(Non
 
     return {
         "success": True,
-        "data": session.data if session.data else None
+        "data": session.data if session.data else None,
     }
 
 
@@ -122,35 +124,15 @@ async def end_session(attempt_id: str, authorization: Optional[str] = Header(Non
     if not user or not user.user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+            detail="Not authenticated",
         )
 
     supabase.table("exam_sessions").update({
         "is_active": False,
-        "session_end": "now()"
+        "session_end": "now()",
     }).eq("attempt_id", attempt_id).execute()
 
     return {
         "success": True,
-        "message": "Session ended successfully"
-    }
-
-
-@router.post("/frame", response_model=dict)
-async def process_frame(frame_data: dict, authorization: Optional[str] = Header(None)):
-    supabase = get_supabase()
-    user = get_user_from_token(authorization)
-
-    if not user or not user.user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
-        )
-
-    return {
-        "success": True,
-        "data": {
-            "processed": True,
-            "detections": []
-        }
+        "message": "Session ended successfully",
     }
