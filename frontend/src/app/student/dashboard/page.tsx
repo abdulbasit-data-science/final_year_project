@@ -6,6 +6,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { BookOpen, LogOut, ArrowRight, Search, Shield, Sparkles } from 'lucide-react'
 import type { ExamAttempt } from '@/lib/types'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function StudentDashboard() {
   const router = useRouter()
   const { user, loading: authLoading, logout } = useAuth()
@@ -22,7 +24,7 @@ export default function StudentDashboard() {
       try {
         const token = localStorage.getItem('access_token')
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
-        const attemptsRes = await fetch('http://localhost:8000/api/attempts/student/me', { headers }).then(r => r.json())
+        const attemptsRes = await fetch(`${API_URL}/api/attempts/student/me`, { headers }).then(r => r.json())
         setAttempts(attemptsRes.data || [])
       } catch (e) { console.error(e) }
       finally { setLoading(false) }

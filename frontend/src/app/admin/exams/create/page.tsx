@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { ArrowLeft, Plus, Trash2, Save, Send, HelpCircle, Shield } from 'lucide-react'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 interface QuestionForm {
   question_text: string; option_a: string; option_b: string; option_c: string; option_d: string
   correct_option: string; marks: number
@@ -48,7 +50,7 @@ export default function CreateExamPage() {
       const payload: any = { title, description, duration_minutes: duration, total_marks: totalMarks }
       if (startTime) payload.start_time = new Date(startTime).toISOString()
       if (endTime) payload.end_time = new Date(endTime).toISOString()
-      const examRes = await fetch('http://localhost:8000/api/exams', {
+      const examRes = await fetch(`${API_URL}/api/exams`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('access_token')}` },
         body: JSON.stringify(payload)
       })
@@ -56,14 +58,14 @@ export default function CreateExamPage() {
       const exam = (await examRes.json()).data
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i]
-        const qRes = await fetch(`http://localhost:8000/api/exams/${exam.id}/questions`, {
+        const qRes = await fetch(`${API_URL}/api/exams/${exam.id}/questions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('access_token')}` },
           body: JSON.stringify({ question_text: q.question_text, option_a: q.option_a, option_b: q.option_b, option_c: q.option_c, option_d: q.option_d, correct_option: q.correct_option, marks: q.marks, order_index: i })
         })
         if (!qRes.ok) throw new Error(await qRes.text())
       }
       if (publish) {
-        await fetch(`http://localhost:8000/api/exams/${exam.id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` } })
+        await fetch(`${API_URL}/api/exams/${exam.id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` } })
       }
       router.push('/admin/dashboard')
     } catch (err: any) { alert(`Failed: ${err.message}`) }
