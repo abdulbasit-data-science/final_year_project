@@ -33,54 +33,62 @@ class FrameProcessor:
             return {"success": False, "violations": [], "processed": False}
 
         violations = []
-        frame_height, frame_width = frame.shape[:2]
-        current_time = time.time()
+        try:
+            frame_height, frame_width = frame.shape[:2]
+            current_time = time.time()
 
-        face_count, faces = self.face_detector.detect(frame)
-        phone_detected, phone_detections = self.object_detector.detect(frame)
-        looking_away = self.behavior_analyzer.analyze(faces, (frame_height, frame_width))
+            face_count, faces = self.face_detector.detect(frame)
+            phone_detected, phone_detections = self.object_detector.detect(frame)
+            looking_away = self.behavior_analyzer.analyze(faces, (frame_height, frame_width))
 
-        if face_count == 0:
-            if self.no_face_start_time is None:
-                self.no_face_start_time = current_time
-            elif current_time - self.no_face_start_time >= self.no_face_threshold:
+            if face_count == 0:
+                if self.no_face_start_time is None:
+                    self.no_face_start_time = current_time
+                elif current_time - self.no_face_start_time >= self.no_face_threshold:
+                    self._add_violation_if_allowed(
+                        violations, ViolationType.NO_FACE_DETECTED, Severity.HIGH,
+                        "No face detected for more than 10 seconds", current_time, attempt_id
+                    )
+                    self.no_face_start_time = current_time
+            else:
+                self.no_face_start_time = None
+
+            if face_count > 1:
                 self._add_violation_if_allowed(
-                    violations, ViolationType.NO_FACE_DETECTED, Severity.HIGH,
-                    "No face detected for more than 10 seconds", current_time, attempt_id
+                    violations, ViolationType.MULTIPLE_FACES, Severity.HIGH,
+                    f"Multiple faces detected: {face_count}", current_time, attempt_id
                 )
-                self.no_face_start_time = current_time
-        else:
-            self.no_face_start_time = None
 
-        if face_count > 1:
-            self._add_violation_if_allowed(
-                violations, ViolationType.MULTIPLE_FACES, Severity.HIGH,
-                f"Multiple faces detected: {face_count}", current_time, attempt_id
-            )
+            if phone_detected:
+                confidence = phone_detections[0]["confidence"] if phone_detections else 0.5
+                if confidence >= 0.4:
+                    self._add_violation_if_allowed(
+                        violations, ViolationType.PHONE_DETECTED, Severity.HIGH,
+                        "Mobile phone detected in frame", current_time, attempt_id,
+                        extra={"confidence": confidence}
+                    )
 
-        if phone_detected:
-            self._add_violation_if_allowed(
-                violations, ViolationType.PHONE_DETECTED, Severity.HIGH,
-                "Mobile phone detected in frame", current_time, attempt_id,
-                extra={"confidence": phone_detections[0]["confidence"] if phone_detections else 0.5}
-            )
+            if looking_away:
+                self._add_violation_if_allowed(
+                    violations, ViolationType.LOOKING_AWAY_EXCESSIVE, Severity.LOW,
+                    "Excessive looking away from screen", current_time, attempt_id
+                )
 
-        if looking_away:
-            self._add_violation_if_allowed(
-                violations, ViolationType.LOOKING_AWAY_EXCESSIVE, Severity.LOW,
-                "Excessive looking away from screen", current_time, attempt_id
-            )
-
-        return {
-            "success": True,
-            "violations": violations,
-            "processed": True,
-            "stats": {
-                "face_count": face_count,
-                "phone_detected": phone_detected,
-                "looking_away": looking_away,
-            },
-        }
+            return {
+                "success": True,
+                "violations": violations,
+                "processed": True,
+                "stats": {
+                    "face_count": face_count,
+                    "phone_detected": phone_detected,
+                    "looking_away": looking_away,
+                },
+            }
+        except Exception as e:
+            print(f"Error processing frame: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "violations": [], "processed": False, "error": str(e)}
 
     def _add_violation_if_allowed(
         self, violations: list, vtype: ViolationType, severity: Severity,

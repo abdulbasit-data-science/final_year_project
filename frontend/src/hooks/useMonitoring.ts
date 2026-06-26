@@ -40,6 +40,7 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
   const lastFrameTimeRef = useRef<number>(0)
   const lastViolationTimeRef = useRef<Record<string, number>>({})
   const violationCooldownRef = useRef(5000)
+  const blurTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem('access_token')
@@ -205,18 +206,36 @@ export function useMonitoring(attemptId: string): UseMonitoringReturn {
       }
     }
 
+    const handleFocus = () => {
+      if (blurTimerRef.current) {
+        clearTimeout(blurTimerRef.current)
+        blurTimerRef.current = null
+      }
+    }
+
     const handleBlur = () => {
       if (state.isMonitoring) {
-        sendViolation('window_blur', attemptId)
+        if (blurTimerRef.current) clearTimeout(blurTimerRef.current)
+        blurTimerRef.current = setTimeout(() => {
+          if (document.hidden) return
+          sendViolation('window_blur', attemptId)
+          blurTimerRef.current = null
+        }, 2000)
       }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('blur', handleBlur)
+    window.addEventListener('focus', handleFocus)
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('focus', handleFocus)
+      if (blurTimerRef.current) {
+        clearTimeout(blurTimerRef.current)
+        blurTimerRef.current = null
+      }
     }
   }, [state.isMonitoring, sendViolation, attemptId])
 

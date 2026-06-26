@@ -22,6 +22,7 @@ export default function AdminDashboard() {
   const [violations, setViolations] = useState<Violation[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedViolations, setExpandedViolations] = useState<Record<string, boolean>>({})
+  const [expandedExamReports, setExpandedExamReports] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== 'admin')) router.push('/login')
@@ -167,6 +168,8 @@ export default function AdminDashboard() {
               <th className="table-header">Title</th>
               <th className="table-header">Duration</th>
               <th className="table-header">Marks</th>
+              <th className="table-header">Start Time</th>
+              <th className="table-header">End Time</th>
               <th className="table-header">Status</th>
               <th className="table-header text-right">Actions</th>
             </tr>
@@ -177,6 +180,12 @@ export default function AdminDashboard() {
                 <td className="table-cell font-medium" style={{ color: 'var(--text-primary)' }}>{exam.title}</td>
                 <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>{exam.duration_minutes} min</td>
                 <td className="table-cell" style={{ color: 'var(--text-secondary)' }}>{exam.total_marks}</td>
+                <td className="table-cell text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  {exam.start_time ? new Date(exam.start_time).toLocaleString() : '-'}
+                </td>
+                <td className="table-cell text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  {exam.end_time ? new Date(exam.end_time).toLocaleString() : '-'}
+                </td>
                 <td className="table-cell">
                   <span className={cn("badge", exam.is_published ? "badge-success" : "badge-neutral")}>
                     {exam.is_published ? 'Published' : 'Draft'}
@@ -195,7 +204,7 @@ export default function AdminDashboard() {
               </tr>
             ))}
             {exams.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-12 text-center">
+              <tr><td colSpan={7} className="px-4 py-12 text-center">
                 <BookOpen className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
                 <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>No exams created yet</p>
                 <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Click "Create Exam" to get started</p>
@@ -207,89 +216,130 @@ export default function AdminDashboard() {
     </>
   )
 
-  const ReportsTab = () => (
-    <>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Exam Reports</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Review student attempts and violations</p>
-      </div>
-      <div className="space-y-4">
-        {attempts.map(attempt => {
-          const exam = exams.find(e => e.id === attempt.exam_id)
-          const attemptViolations = violations.filter(v => v.attempt_id === attempt.id)
-          const isExpanded = expandedViolations[attempt.id] || false
-          return (
-            <div key={attempt.id} className="card animate-fade-in">
-              <div className="flex items-start justify-between mb-5">
-                <div>
-                  <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{exam?.title || 'Unknown Exam'}</h3>
-                  <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{(attempt as any).student_name || attempt.student_id}</p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                    {new Date(attempt.started_at).toLocaleString()}
-                    {attempt.submitted_at && <> &middot; {new Date(attempt.submitted_at).toLocaleString()}</>}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={cn("badge", attempt.status === 'completed' ? "badge-success" : attempt.status === 'flagged' ? "badge-danger" : attempt.status === 'in_progress' ? "badge-info" : "badge-neutral")}>{attempt.status}</span>
-                  {attempt.status !== 'completed' && attempt.status !== 'reviewed' && <>
-                    <button onClick={() => reviewAttempt(attempt.id, 'completed')} className="btn-ghost p-2 rounded-lg text-emerald-600"><CheckCircle className="w-4 h-4" /></button>
-                    <button onClick={() => reviewAttempt(attempt.id, 'reviewed')} className="btn-ghost p-2 rounded-lg text-red-500"><XCircle className="w-4 h-4" /></button>
-                  </>}
-                  <button onClick={() => deleteAttempt(attempt.id)} className="btn-ghost p-2 rounded-lg hover:bg-red-50 text-red-400"><Trash2 className="w-4 h-4" /></button>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4 mb-4">
-                <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--bg-surface)' }}>
-                  <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Score</p>
-                  <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{attempt.score !== null ? `${attempt.score}/${exam?.total_marks}` : '-'}</p>
-                </div>
-                <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--bg-surface)' }}>
-                  <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Violations</p>
-                  <p className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                    <AlertTriangle className="w-5 h-5 text-red-400" /> {attemptViolations.length}
-                  </p>
-                </div>
-                <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--bg-surface)' }}>
-                  <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Duration</p>
-                  <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {attempt.submitted_at ? Math.round((new Date(attempt.submitted_at).getTime() - new Date(attempt.started_at).getTime()) / 60000) + ' min' : 'In progress'}
-                  </p>
-                </div>
-              </div>
-              {attemptViolations.length > 0 && (
-                <div>
-                  <button onClick={() => setExpandedViolations(prev => ({ ...prev, [attempt.id]: !isExpanded }))}
-                    className="flex items-center gap-2 w-full p-3 rounded-xl hover:bg-red-50 transition-colors text-sm"
-                    style={{ color: 'var(--text-primary)' }}>
-                    {isExpanded ? <ChevronDown className="w-4 h-4 text-red-400" /> : <ChevronRight className="w-4 h-4 text-red-400" />}
-                    <AlertTriangle className="w-4 h-4 text-red-400" />
-                    <span className="font-medium text-red-700">{attemptViolations.length} Violation{attemptViolations.length > 1 ? 's' : ''}</span>
-                  </button>
-                  {isExpanded && (
-                    <div className="rounded-xl p-4 mt-1 grid grid-cols-2 gap-2 animate-fade-in" style={{ backgroundColor: 'rgba(239,68,68,0.05)' }}>
-                      {attemptViolations.map((v, i) => (
-                        <div key={i} className="flex items-center justify-between text-sm rounded-lg p-3" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid rgba(239,68,68,0.15)' }}>
-                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{VIOLATION_TYPES[v.violation_type]}</span>
-                          <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>{new Date(v.detected_at).toLocaleTimeString()}</span>
-                        </div>
-                      ))}
+  const ReportsTab = () => {
+    const examAttemptsMap = attempts.reduce<Record<string, ExamAttempt[]>>((acc, a) => {
+      if (!acc[a.exam_id]) acc[a.exam_id] = []
+      acc[a.exam_id].push(a)
+      return acc
+    }, {})
+
+    return (
+      <>
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Exam Reports</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Review student attempts and violations</p>
+        </div>
+        <div className="space-y-4">
+          {Object.entries(examAttemptsMap).map(([examId, examAttempts]) => {
+            const exam = exams.find(e => e.id === examId)
+            const isExpanded = expandedExamReports[examId] || false
+            return (
+              <div key={examId} className="card animate-fade-in overflow-hidden">
+                <button onClick={() => setExpandedExamReports(prev => ({ ...prev, [examId]: !isExpanded }))}
+                  className="w-full flex items-center justify-between p-5 hover:bg-surface-50/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-primary-50 flex items-center justify-center" style={{ color: 'var(--accent)' }}>
+                      {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                     </div>
-                  )}
-                </div>
-              )}
+                    <div className="text-left">
+                      <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{exam?.title || 'Unknown Exam'}</h3>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        {exam?.duration_minutes} min &middot; {exam?.total_marks} marks
+                        {exam?.start_time && <> &middot; {new Date(exam.start_time).toLocaleDateString()}</>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                      {examAttempts.length} student{examAttempts.length > 1 ? 's' : ''}
+                    </span>
+                    <span className={cn("badge", examAttempts.some(a => a.status === 'flagged') ? "badge-danger" : "badge-success")}>
+                      {examAttempts.filter(a => a.status === 'completed' || a.status === 'reviewed').length}/{examAttempts.length} completed
+                    </span>
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid var(--border)' }}>
+                    {examAttempts.map(attempt => {
+                      const attemptViolations = violations.filter(v => v.attempt_id === attempt.id)
+                      const isViolationsExpanded = expandedViolations[attempt.id] || false
+                      return (
+                        <div key={attempt.id} className="px-5 py-4 transition-colors hover:bg-surface-50/30" style={{ borderBottom: '1px solid var(--border)' }}>
+                          <div className="flex items-start justify-between mb-3">
+                            <div>
+                              <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{(attempt as any).student_name || attempt.student_id}</p>
+                              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                                {new Date(attempt.started_at).toLocaleString()}
+                                {attempt.submitted_at && <> &middot; {new Date(attempt.submitted_at).toLocaleString()}</>}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={cn("badge", attempt.status === 'completed' ? "badge-success" : attempt.status === 'flagged' ? "badge-danger" : attempt.status === 'in_progress' ? "badge-info" : "badge-neutral")}>{attempt.status}</span>
+                              {attempt.status !== 'completed' && attempt.status !== 'reviewed' && <>
+                                <button onClick={() => reviewAttempt(attempt.id, 'completed')} className="btn-ghost p-1.5 rounded-lg text-emerald-600"><CheckCircle className="w-4 h-4" /></button>
+                                <button onClick={() => reviewAttempt(attempt.id, 'reviewed')} className="btn-ghost p-1.5 rounded-lg text-red-500"><XCircle className="w-4 h-4" /></button>
+                              </>}
+                              <button onClick={() => deleteAttempt(attempt.id)} className="btn-ghost p-1.5 rounded-lg hover:bg-red-50 text-red-400"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 mb-3">
+                            <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-surface)' }}>
+                              <p className="text-xs font-medium uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>Score</p>
+                              <p className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{attempt.score !== null ? `${attempt.score}/${exam?.total_marks}` : '-'}</p>
+                            </div>
+                            <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-surface)' }}>
+                              <p className="text-xs font-medium uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>Violations</p>
+                              <p className="text-base font-bold flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                                <AlertTriangle className="w-4 h-4 text-red-400" /> {attemptViolations.length}
+                              </p>
+                            </div>
+                            <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-surface)' }}>
+                              <p className="text-xs font-medium uppercase tracking-wider mb-0.5" style={{ color: 'var(--text-muted)' }}>Duration</p>
+                              <p className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
+                                {attempt.submitted_at ? Math.round((new Date(attempt.submitted_at).getTime() - new Date(attempt.started_at).getTime()) / 60000) + ' min' : 'In progress'}
+                              </p>
+                            </div>
+                          </div>
+                          {attemptViolations.length > 0 && (
+                            <div>
+                              <button onClick={() => setExpandedViolations(prev => ({ ...prev, [attempt.id]: !isViolationsExpanded }))}
+                                className="flex items-center gap-2 w-full p-2 rounded-lg hover:bg-red-50 transition-colors text-xs"
+                                style={{ color: 'var(--text-primary)' }}>
+                                {isViolationsExpanded ? <ChevronDown className="w-3.5 h-3.5 text-red-400" /> : <ChevronRight className="w-3.5 h-3.5 text-red-400" />}
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                                <span className="font-medium text-red-700">{attemptViolations.length} Violation{attemptViolations.length > 1 ? 's' : ''}</span>
+                              </button>
+                              {isViolationsExpanded && (
+                                <div className="rounded-lg p-3 mt-1 grid grid-cols-2 gap-2 animate-fade-in" style={{ backgroundColor: 'rgba(239,68,68,0.05)' }}>
+                                  {attemptViolations.map((v, i) => (
+                                    <div key={i} className="flex items-center justify-between text-xs rounded-lg p-2.5" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                                      <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{VIOLATION_TYPES[v.violation_type]}</span>
+                                      <span className="ml-2" style={{ color: 'var(--text-muted)' }}>{new Date(v.detected_at).toLocaleTimeString()}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {Object.keys(examAttemptsMap).length === 0 && (
+            <div className="card text-center py-16" style={{ borderStyle: 'dashed', borderWidth: 2, borderColor: 'var(--border)' }}>
+              <FileText className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
+              <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>No exam attempts yet</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Reports appear here once students take exams</p>
             </div>
-          )
-        })}
-        {attempts.length === 0 && (
-          <div className="card text-center py-16" style={{ borderStyle: 'dashed', borderWidth: 2, borderColor: 'var(--border)' }}>
-            <FileText className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
-            <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>No exam attempts yet</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Reports appear here once students take exams</p>
-          </div>
-        )}
-      </div>
-    </>
-  )
+          )}
+        </div>
+      </>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-grid relative" style={{ backgroundColor: 'var(--bg-primary)' }}>

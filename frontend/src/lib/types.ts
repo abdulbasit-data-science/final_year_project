@@ -16,6 +16,8 @@ export interface Exam {
   duration_minutes: number
   total_marks: number
   is_published: boolean
+  start_time: string | null
+  end_time: string | null
   created_by: string
   created_at: string
   updated_at: string

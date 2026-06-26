@@ -135,31 +135,53 @@ class ObjectDetector:
         return phone_detected, detections
 
     def _detect_contour(self, frame: np.ndarray) -> Tuple[bool, List[dict]]:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-        for lower, upper in PHONE_COLOR_RANGES:
-            lower = np.array(lower, dtype=np.uint8)
-            upper = np.array(upper, dtype=np.uint8)
-            mask = cv2.bitwise_or(mask, cv2.inRange(hsv, lower, upper))
-        mask = cv2.GaussianBlur(mask, (5, 5), 0)
-        mask = cv2.erode(mask, None, iterations=1)
-        mask = cv2.dilate(mask, None, iterations=2)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        h, w = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        edges = cv2.dilate(edges, kernel, iterations=1)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         detections = []
         phone_detected = False
+        img_area = h * w
         for contour in contours:
+            peri = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+            x, y, cw, ch = cv2.boundingRect(contour)
             area = cv2.contourArea(contour)
-            if area < 2000 or area > frame.shape[0] * frame.shape[1] * 0.3:
+            if area < img_area * 0.005 or area > img_area * 0.4:
                 continue
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = h / w if w > 0 else 0
-            if 1.2 <= aspect_ratio <= 3.0:
+            aspect_ratio = ch / cw if cw > 0 else 0
+            rect_area = cw * ch
+            fill_ratio = area / rect_area if rect_area > 0 else 0
+            if 1.3 <= aspect_ratio <= 3.0 and fill_ratio > 0.3:
                 phone_detected = True
                 detections.append({
                     "class": "phone",
-                    "confidence": 0.5,
-                    "bbox": [x, y, w, h],
+                    "confidence": 0.6,
+                    "bbox": [x, y, cw, ch],
                 })
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        for lower, upper in PHONE_COLOR_RANGES:
+            lower = np.array(lower, dtype=np.uint8)
+            upper = np.array(upper, dtype=np.uint8)
+            color_mask = cv2.inRange(hsv, lower, upper)
+            color_mask = cv2.GaussianBlur(color_mask, (5, 5), 0)
+            color_mask = cv2.dilate(color_mask, None, iterations=2)
+            color_contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cc in color_contours:
+                area = cv2.contourArea(cc)
+                if area < 3000 or area > img_area * 0.25:
+                    continue
+                cx, cy, cw, ch = cv2.boundingRect(cc)
+                aspect_ratio = ch / cw if cw > 0 else 0
+                if 1.2 <= aspect_ratio <= 3.5:
+                    phone_detected = True
+                    detections.append({
+                        "class": "phone",
+                        "confidence": 0.5,
+                        "bbox": [cx, cy, cw, ch],
+                    })
         return phone_detected, detections
 
 

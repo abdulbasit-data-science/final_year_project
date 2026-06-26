@@ -93,6 +93,7 @@ function ExamContent({ examId }: { examId: string }) {
 
   return (
     <div className="min-h-screen bg-grid relative" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <video ref={videoRef as React.RefObject<HTMLVideoElement>} className="hidden" playsInline muted />
       <canvas ref={canvasRef as React.RefObject<HTMLCanvasElement>} className="hidden" />
       <div className="fixed top-[-15%] left-[-5%] w-[30%] h-[30%] rounded-full bg-gradient-to-br from-primary-400/10 to-primary-600/5 blur-3xl animate-float pointer-events-none" />
 

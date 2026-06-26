@@ -3,14 +3,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-import { BookOpen, LogOut, ArrowRight, Search, Shield, Sparkles, Zap } from 'lucide-react'
-import type { Exam, ExamAttempt } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { BookOpen, LogOut, ArrowRight, Search, Shield, Sparkles } from 'lucide-react'
+import type { ExamAttempt } from '@/lib/types'
 
 export default function StudentDashboard() {
   const router = useRouter()
   const { user, loading: authLoading, logout } = useAuth()
-  const [exams, setExams] = useState<Exam[]>([])
   const [attempts, setAttempts] = useState<ExamAttempt[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -24,10 +22,6 @@ export default function StudentDashboard() {
       try {
         const token = localStorage.getItem('access_token')
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
-        const [examsRes] = await Promise.all([
-          fetch('http://localhost:8000/api/exams?is_published=true', { headers }).then(r => r.json()),
-        ])
-        setExams(examsRes.data || [])
         const attemptsRes = await fetch('http://localhost:8000/api/attempts/student/me', { headers }).then(r => r.json())
         setAttempts(attemptsRes.data || [])
       } catch (e) { console.error(e) }
@@ -35,11 +29,6 @@ export default function StudentDashboard() {
     }
     fetchData()
   }, [user])
-
-  const startExam = (examId: string) => {
-    const existingAttempt = attempts.find(a => a.exam_id === examId && a.status === 'in_progress')
-    router.push(existingAttempt ? `/student/exam/${examId}?attemptId=${existingAttempt.id}` : `/student/exam/${examId}`)
-  }
 
   const [examIdInput, setExamIdInput] = useState('')
   const handleStartExam = (e: React.FormEvent) => {
@@ -100,46 +89,7 @@ export default function StudentDashboard() {
           </form>
         </div>
 
-        <section>
-          <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Available Exams</h2>
-          {exams.length === 0 ? (
-            <div className="card text-center py-16" style={{ borderStyle: 'dashed', borderWidth: 2, borderColor: 'var(--border)' }}>
-              <BookOpen className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
-              <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>No exams available</p>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Check back later for new exams</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {exams.map(exam => {
-                const attempt = attempts.find(a => a.exam_id === exam.id)
-                const attempted = attempt && attempt.status !== 'in_progress'
-                return (
-                  <div key={exam.id} className={cn("card-glass p-6 hover:-translate-y-0.5 transition-all duration-300", attempted && "opacity-60")}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <Zap className="w-4 h-4" style={{ color: 'var(--accent)' }} />
-                      <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{exam.title}</h3>
-                    </div>
-                    <p className="text-sm mb-4 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{exam.description}</p>
-                    <div className="flex items-center justify-between text-sm mb-5" style={{ color: 'var(--text-muted)' }}>
-                      <span>{exam.duration_minutes} min</span>
-                      <span>{exam.total_marks} marks</span>
-                    </div>
-                    {attempted ? (
-                      <div className={cn("badge w-full justify-center py-2", attempt?.status === 'completed' ? "badge-success" : "badge-danger")}>
-                        {attempt?.status === 'completed' ? 'Completed' : 'Flagged'}
-                      </div>
-                    ) : (
-                      <button onClick={() => startExam(exam.id)} className="btn btn-primary w-full">
-                        {attempt?.status === 'in_progress' ? 'Continue' : 'Start Exam'}
-                        <ArrowRight className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
+
       </main>
     </div>
   )
