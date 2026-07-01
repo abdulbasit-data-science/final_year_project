@@ -48,9 +48,10 @@ ALTER TABLE exams ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Students can view published exams" ON exams
     FOR SELECT USING (is_published = TRUE);
 
-CREATE POLICY "Admins can manage all exams" ON exams
+CREATE POLICY "Admins can manage own exams" ON exams
     FOR ALL USING (
         EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        AND created_by = auth.uid()
     );
 
 -- Questions table
@@ -75,9 +76,14 @@ ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Anyone can view questions" ON questions
     FOR SELECT USING (TRUE);
 
-CREATE POLICY "Admins can manage questions" ON questions
+CREATE POLICY "Admins can manage own exam questions" ON questions
     FOR ALL USING (
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        EXISTS (
+            SELECT 1 FROM exams
+            WHERE exams.id = questions.exam_id
+            AND exams.created_by = auth.uid()
+        )
+        AND EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
     );
 
 -- Exam Attempts table
@@ -107,14 +113,24 @@ CREATE POLICY "Students can create attempts" ON exam_attempts
 CREATE POLICY "Students can update own attempts" ON exam_attempts
     FOR UPDATE USING (auth.uid() = student_id);
 
-CREATE POLICY "Admins can view all attempts" ON exam_attempts
+CREATE POLICY "Admins can view own exam attempts" ON exam_attempts
     FOR SELECT USING (
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        EXISTS (
+            SELECT 1 FROM exams
+            WHERE exams.id = exam_attempts.exam_id
+            AND exams.created_by = auth.uid()
+        )
+        AND EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
     );
 
-CREATE POLICY "Admins can manage all attempts" ON exam_attempts
+CREATE POLICY "Admins can manage own exam attempts" ON exam_attempts
     FOR ALL USING (
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        EXISTS (
+            SELECT 1 FROM exams
+            WHERE exams.id = exam_attempts.exam_id
+            AND exams.created_by = auth.uid()
+        )
+        AND EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
     );
 
 -- Student Answers table
@@ -139,9 +155,15 @@ CREATE POLICY "Users can manage own answers" ON student_answers
         )
     );
 
-CREATE POLICY "Admins can view all answers" ON student_answers
+CREATE POLICY "Admins can view own exam answers" ON student_answers
     FOR SELECT USING (
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        EXISTS (
+            SELECT 1 FROM exam_attempts ea
+            JOIN exams ON exams.id = ea.exam_id
+            WHERE ea.id = attempt_id
+            AND exams.created_by = auth.uid()
+        )
+        AND EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
     );
 
 -- Violations table
@@ -178,9 +200,15 @@ CREATE POLICY "Users can view own attempt violations" ON violations
         )
     );
 
-CREATE POLICY "Admins can view all violations" ON violations
+CREATE POLICY "Admins can view own exam violations" ON violations
     FOR SELECT USING (
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        EXISTS (
+            SELECT 1 FROM exam_attempts ea
+            JOIN exams ON exams.id = ea.exam_id
+            WHERE ea.id = attempt_id
+            AND exams.created_by = auth.uid()
+        )
+        AND EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
     );
 
 -- Exam Sessions table
@@ -206,9 +234,15 @@ CREATE POLICY "Users can manage own sessions" ON exam_sessions
         )
     );
 
-CREATE POLICY "Admins can manage all sessions" ON exam_sessions
+CREATE POLICY "Admins can manage own exam sessions" ON exam_sessions
     FOR ALL USING (
-        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+        EXISTS (
+            SELECT 1 FROM exam_attempts ea
+            JOIN exams ON exams.id = ea.exam_id
+            WHERE ea.id = attempt_id
+            AND exams.created_by = auth.uid()
+        )
+        AND EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
     );
 
 -- Create indexes for better performance

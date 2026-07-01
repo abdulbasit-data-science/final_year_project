@@ -117,7 +117,16 @@ async def list_attempts(authorization: Optional[str] = Header(None)):
         user = get_user_from_token(authorization)
         if not user or not user.user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-        attempts = supabase.table("exam_attempts").select("*").order("started_at", desc=True).execute()
+
+        # Get exams owned by this admin
+        admin_exams = supabase.table("exams").select("id").eq("created_by", user.user.id).execute()
+        admin_exam_ids = [e["id"] for e in admin_exams.data or []]
+
+        if admin_exam_ids:
+            attempts = supabase.table("exam_attempts").select("*").in_("exam_id", admin_exam_ids).order("started_at", desc=True).execute()
+        else:
+            attempts = supabase.table("exam_attempts").select("*").eq("exam_id", "none").execute()
+            attempts.data = []
 
         student_ids = list(set(a.get("student_id") for a in attempts.data if a.get("student_id")))
         profiles_map = {}
@@ -150,6 +159,12 @@ async def get_attempt(attempt_id: UUID, authorization: Optional[str] = Header(No
     attempt = supabase.table("exam_attempts").select("*").eq("id", str(attempt_id)).single().execute()
     if not attempt.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
+
+    # Check ownership - admin can only access attempts for their own exams
+    exam = supabase.table("exams").select("created_by").eq("id", str(attempt.data["exam_id"])).single().execute()
+    if not exam.data or exam.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to view this attempt")
+
     answers = supabase.table("student_answers").select("*").eq("attempt_id", str(attempt_id)).execute()
     attempt_data = attempt.data
     attempt_data["answers"] = answers.data
@@ -171,6 +186,14 @@ async def update_attempt(
             detail="Not authenticated"
         )
 
+    attempt = supabase.table("exam_attempts").select("exam_id").eq("id", attempt_id).single().execute()
+    if not attempt.data:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+
+    exam = supabase.table("exams").select("created_by").eq("id", str(attempt.data["exam_id"])).single().execute()
+    if not exam.data or exam.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to update this attempt")
+
     update_data = attempt_data.model_dump(exclude_unset=True)
     if update_data:
         supabase.table("exam_attempts").update(update_data).eq("id", attempt_id).execute()
@@ -191,6 +214,14 @@ async def delete_attempt(attempt_id: str, authorization: Optional[str] = Header(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
         )
+
+    attempt = supabase.table("exam_attempts").select("exam_id").eq("id", attempt_id).single().execute()
+    if not attempt.data:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+
+    exam = supabase.table("exams").select("created_by").eq("id", str(attempt.data["exam_id"])).single().execute()
+    if not exam.data or exam.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this attempt")
 
     supabase.table("violations").delete().eq("attempt_id", attempt_id).execute()
     supabase.table("exam_sessions").delete().eq("attempt_id", attempt_id).execute()

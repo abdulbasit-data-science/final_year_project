@@ -249,13 +249,20 @@ export default function AdminDashboard() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
                     <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
                       {examAttempts.length} student{examAttempts.length > 1 ? 's' : ''}
                     </span>
                     <span className={cn("badge", examAttempts.some(a => a.status === 'flagged') ? "badge-danger" : "badge-success")}>
                       {examAttempts.filter(a => a.status === 'completed' || a.status === 'reviewed').length}/{examAttempts.length} completed
                     </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteExam(examId) }}
+                      className="btn-ghost p-2 rounded-lg hover:bg-red-50"
+                      title="Delete exam"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-400" />
+                    </button>
                   </div>
                 </button>
                 {isExpanded && (

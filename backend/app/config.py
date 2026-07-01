@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: Optional[str] = None
     SUPABASE_SERVICE_KEY: Optional[str] = None
 
+    GOOGLE_CLIENT_ID: Optional[str] = None
+
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
 
     class Config:

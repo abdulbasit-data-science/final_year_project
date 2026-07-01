@@ -69,15 +69,338 @@ class LoginRequest(BaseModel):
     password: str
 
 
-@router.post("/register")
-async def register(user_data: RegisterRequest):
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+    role: str = "student"
+
+
+class GoogleVerifyRequest(BaseModel):
+    id_token: str
+
+
+class RegisterWithGoogle(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    role: str = "student"
+    google_token: str = ""
+
+
+@router.post("/google")
+async def google_auth(google_data: GoogleAuthRequest):
     try:
+        # Verify Google token - try as ID token first, then as access token
+        async with httpx.AsyncClient() as client:
+            # Try verifying as ID token
+            id_verify_response = await client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": google_data.id_token}
+            )
+
+            if id_verify_response.status_code == 200:
+                token_info = id_verify_response.json()
+                # Verify the token is intended for our app
+                if token_info.get("aud") != settings.GOOGLE_CLIENT_ID:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Token not intended for this application"
+                    )
+            else:
+                # Try verifying as access token via userinfo endpoint
+                userinfo_response = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {google_data.id_token}"}
+                )
+
+                if userinfo_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid Google token"
+                    )
+
+                token_info = userinfo_response.json()
+
+                # For access tokens, verify the azp matches our client
+                if token_info.get("sub") is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid Google token - no user identifier"
+                    )
+
+            google_email = token_info.get("email")
+            google_name = token_info.get("name", "")
+            google_sub = token_info.get("sub")
+
+            if not google_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email not provided by Google"
+                )
+
+        # Check if user already exists
+        supabase = get_supabase_admin()
+        existing = supabase.table("profiles").select("*").eq("email", google_email).execute()
+
+        if existing.data:
+            # User exists - sign them in
+            profile = existing.data[0]
+            user_id = profile["id"]
+
+            deterministic_password = f"google_{google_sub}"
+
+            async with httpx.AsyncClient() as client:
+                # Try signing in with deterministic password first (works for Google-created users)
+                token_response = await client.post(
+                    f"{settings.SUPABASE_URL}/auth/v1/token?grant_type=password",
+                    headers={
+                        "apikey": settings.SUPABASE_ANON_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "email": google_email,
+                        "password": deterministic_password
+                    }
+                )
+
+                # If that fails, reset password via Admin API then sign in
+                if token_response.status_code != 200:
+                    # Update user password using Admin API
+                    update_response = await client.put(
+                        f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                        headers={
+                            "apikey": settings.SUPABASE_ANON_KEY,
+                            "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "password": deterministic_password
+                        }
+                    )
+
+                    if update_response.status_code not in (200, 201):
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Could not update password for existing user"
+                        )
+
+                    # Sign in with the new password
+                    token_response = await client.post(
+                        f"{settings.SUPABASE_URL}/auth/v1/token?grant_type=password",
+                        headers={
+                            "apikey": settings.SUPABASE_ANON_KEY,
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "email": google_email,
+                            "password": deterministic_password
+                        }
+                    )
+
+                    if token_response.status_code != 200:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Could not generate authentication token"
+                        )
+
+                auth_data = token_response.json()
+
+        else:
+            # New user - create via Supabase Auth Admin API
+            async with httpx.AsyncClient() as client:
+                auth_response = await client.post(
+                    f"{settings.SUPABASE_URL}/auth/v1/admin/users",
+                    headers={
+                        "apikey": settings.SUPABASE_ANON_KEY,
+                        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "email": google_email,
+                        "password": f"google_{google_sub}",
+                        "email_confirm": True,
+                        "user_metadata": {
+                            "full_name": google_name,
+                            "role": google_data.role
+                        }
+                    }
+                )
+
+                if auth_response.status_code not in (200, 201):
+                    error_text = auth_response.text
+                    if "already exists" in error_text.lower():
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="An account with this email already exists. Please sign in."
+                        )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Auth creation failed: {error_text[:300]}"
+                    )
+
+                auth_data = auth_response.json()
+                user_id = auth_data.get("id")
+
+            if not user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Registration failed - no user ID returned"
+                )
+
+            # Create profile
+            async with httpx.AsyncClient() as client:
+                profile_response = await client.post(
+                    f"{settings.SUPABASE_URL}/rest/v1/profiles",
+                    headers={
+                        "apikey": settings.SUPABASE_ANON_KEY,
+                        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal"
+                    },
+                    json={
+                        "id": user_id,
+                        "email": google_email,
+                        "full_name": google_name,
+                        "role": google_data.role
+                    }
+                )
+
+                if profile_response.status_code not in (200, 201):
+                    print(f"Profile creation warning: {profile_response.status_code} {profile_response.text[:200]}")
+
+            # Sign in the newly created user
+            async with httpx.AsyncClient() as client:
+                token_response = await client.post(
+                    f"{settings.SUPABASE_URL}/auth/v1/token?grant_type=password",
+                    headers={
+                        "apikey": settings.SUPABASE_ANON_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "email": google_email,
+                        "password": f"google_{google_sub}"
+                    }
+                )
+
+                if token_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Account created but could not sign in"
+                    )
+
+                auth_data = token_response.json()
+
+        access_token = auth_data.get("access_token")
+        refresh_token = auth_data.get("refresh_token")
+
+        return {
+            "success": True,
+            "data": {
+                "user": {
+                    "id": user_id,
+                    "email": google_email,
+                    "full_name": google_name,
+                    "role": existing.data[0]["role"] if existing.data else google_data.role
+                },
+                "session": {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "expires_in": auth_data.get("expires_in", 3600),
+                    "expires_at": auth_data.get("expires_at")
+                }
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Google auth error: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google authentication failed: {str(e)[:200]}"
+        )
+
+
+@router.post("/verify-google")
+async def verify_google(verify_data: GoogleVerifyRequest):
+    try:
+        async with httpx.AsyncClient() as client:
+            id_verify_response = await client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": verify_data.id_token}
+            )
+
+            if id_verify_response.status_code == 200:
+                token_info = id_verify_response.json()
+                if token_info.get("aud") != settings.GOOGLE_CLIENT_ID:
+                    raise HTTPException(status_code=401, detail="Token not intended for this application")
+            else:
+                userinfo_response = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {verify_data.id_token}"}
+                )
+                if userinfo_response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Google token")
+                token_info = userinfo_response.json()
+                if token_info.get("sub") is None:
+                    raise HTTPException(status_code=401, detail="Invalid Google token")
+
+            google_email = token_info.get("email")
+            google_name = token_info.get("name", "")
+
+            if not google_email:
+                raise HTTPException(status_code=400, detail="Email not provided by Google")
+
+            return {
+                "success": True,
+                "data": {
+                    "email": google_email,
+                    "name": google_name
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/register")
+async def register(user_data: RegisterWithGoogle):
+    try:
+        # If google_token is provided, verify the email is Google-authenticated
+        google_token = getattr(user_data, 'google_token', '')
+        if google_token:
+            async with httpx.AsyncClient() as client:
+                id_verify = await client.get(
+                    "https://oauth2.googleapis.com/tokeninfo",
+                    params={"id_token": google_token}
+                )
+                if id_verify.status_code == 200:
+                    token_info = id_verify.json()
+                else:
+                    userinfo = await client.get(
+                        "https://www.googleapis.com/oauth2/v3/userinfo",
+                        headers={"Authorization": f"Bearer {google_token}"}
+                    )
+                    if userinfo.status_code != 200:
+                        raise HTTPException(status_code=401, detail="Invalid Google token")
+                    token_info = userinfo.json()
+
+                verified_email = token_info.get("email")
+                if not verified_email or verified_email.lower() != user_data.email.lower():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Email does not match Google-authenticated email"
+                    )
+        else:
+            # Registration without Google token is rejected
+            raise HTTPException(
+                status_code=400,
+                detail="Google email verification is required to register"
+            )
+
         print(f"Registering user: {user_data.email}")
 
         # Use direct HTTP call to Supabase Auth Admin API
         async with httpx.AsyncClient() as client:
-            # Create user via Supabase Auth Admin API
-            # Use anon key for apikey header, service key for Authorization (bypasses RLS)
             auth_response = await client.post(
                 f"{settings.SUPABASE_URL}/auth/v1/admin/users",
                 headers={

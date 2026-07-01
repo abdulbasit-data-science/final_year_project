@@ -26,6 +26,19 @@ def get_supabase() -> Client:
         )
     return supabase
 
+def check_violation_ownership(supabase: Client, violation_id: str, user_id: str) -> bool:
+    violation = supabase.table("violations").select("attempt_id").eq("id", violation_id).single().execute()
+    if not violation.data:
+        return False
+    attempt = supabase.table("exam_attempts").select("exam_id").eq("id", str(violation.data["attempt_id"])).single().execute()
+    if not attempt.data:
+        return False
+    exam = supabase.table("exams").select("created_by").eq("id", str(attempt.data["exam_id"])).single().execute()
+    if not exam.data:
+        return False
+    return exam.data["created_by"] == user_id
+
+
 @router.get("/all", response_model=dict)
 async def get_all_violations(authorization: str = Header(None)):
     supabase = get_supabase()
@@ -37,7 +50,21 @@ async def get_all_violations(authorization: str = Header(None)):
             detail="Not authenticated"
         )
 
-    violations = supabase.table("violations").select("*").order("detected_at", desc=True).execute()
+    # Get exams owned by this admin
+    admin_exams = supabase.table("exams").select("id").eq("created_by", user.user.id).execute()
+    admin_exam_ids = [e["id"] for e in admin_exams.data or []]
+
+    if not admin_exam_ids:
+        return {"success": True, "data": []}
+
+    # Get attempts from those exams
+    attempts = supabase.table("exam_attempts").select("id").in_("exam_id", admin_exam_ids).execute()
+    attempt_ids = [a["id"] for a in attempts.data or []]
+
+    if not attempt_ids:
+        return {"success": True, "data": []}
+
+    violations = supabase.table("violations").select("*").in_("attempt_id", attempt_ids).order("detected_at", desc=True).execute()
 
     return {
         "success": True,
@@ -212,6 +239,9 @@ async def update_violation(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
         )
+
+    if not check_violation_ownership(supabase, violation_id, user.user.id):
+        raise HTTPException(status_code=403, detail="You do not have permission to update this violation")
 
     update_data = {}
     if severity:

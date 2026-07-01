@@ -73,7 +73,7 @@ async def list_all_exams(authorization: str = Header(None)):
             detail="Not authenticated"
         )
 
-    result = supabase.table("exams").select("*").execute()
+    result = supabase.table("exams").select("*").eq("created_by", user.user.id).execute()
 
     return {
         "success": True,
@@ -150,6 +150,12 @@ async def update_exam(exam_id: str, exam_data: ExamUpdate, authorization: str = 
             detail="Not authenticated"
         )
 
+    existing = supabase.table("exams").select("created_by").eq("id", exam_id).single().execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if existing.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify this exam")
+
     update_data = exam_data.model_dump(exclude_unset=True)
 
     exam = supabase.table("exams").update(update_data).eq("id", exam_id).execute()
@@ -170,6 +176,12 @@ async def delete_exam(exam_id: str, authorization: str = Header(None)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
         )
+
+    existing = supabase.table("exams").select("created_by").eq("id", exam_id).single().execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if existing.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this exam")
 
     attempts = supabase.table("exam_attempts").select("id").eq("exam_id", exam_id).execute()
     if attempts.data:
@@ -198,9 +210,11 @@ async def publish_exam(exam_id: str, authorization: str = Header(None)):
             detail="Not authenticated"
         )
 
-    current = supabase.table("exams").select("is_published").eq("id", exam_id).single().execute()
+    current = supabase.table("exams").select("is_published, created_by").eq("id", exam_id).single().execute()
     if not current.data:
         raise HTTPException(status_code=404, detail="Exam not found")
+    if current.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to publish this exam")
 
     new_status = not current.data["is_published"]
     supabase.table("exams").update({"is_published": new_status}).eq("id", exam_id).execute()
@@ -221,6 +235,12 @@ async def add_question(exam_id: str, question_data: QuestionCreate, authorizatio
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
         )
+
+    exam = supabase.table("exams").select("created_by").eq("id", exam_id).single().execute()
+    if not exam.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if exam.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to add questions to this exam")
 
     question = supabase.table("questions").insert({
         "exam_id": exam_id,
@@ -256,6 +276,12 @@ async def update_question(
             detail="Not authenticated"
         )
 
+    exam = supabase.table("exams").select("created_by").eq("id", exam_id).single().execute()
+    if not exam.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if exam.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to modify questions in this exam")
+
     question = supabase.table("questions").update({
         "question_text": question_data.question_text,
         "option_a": question_data.option_a,
@@ -283,6 +309,12 @@ async def delete_question(exam_id: str, question_id: str, authorization: str = H
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated"
         )
+
+    exam = supabase.table("exams").select("created_by").eq("id", exam_id).single().execute()
+    if not exam.data:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if exam.data["created_by"] != user.user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete questions from this exam")
 
     supabase.table("questions").delete().eq("id", question_id).execute()
 
